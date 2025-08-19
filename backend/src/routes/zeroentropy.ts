@@ -47,6 +47,8 @@ router.get('/documents', async (req: Request, res: Response) => {
     const formattedDocs = docsWithContent.map((doc: any) => ({
       id: doc.id,
       text: doc.content || '',
+      title: doc.metadata?.title || 'Untitled',
+      summary: doc.metadata?.summary || '',
       timestamp: doc.metadata?.timestamp || new Date().toISOString(),
       recordingId: doc.metadata?.recordingId || 'unknown',
       topic: doc.metadata?.topic || '',
@@ -142,6 +144,8 @@ router.post('/search', async (req: Request, res: Response) => {
     // Format the results
     const formattedResults = topDocs.map((doc: any) => ({
       text: doc.content,
+      title: doc.metadata?.title || 'Untitled',
+      summary: doc.metadata?.summary || '',
       score: doc.score,
       metadata: doc.metadata,
       path: doc.path,

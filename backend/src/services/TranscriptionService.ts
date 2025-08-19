@@ -19,21 +19,29 @@ class TranscriptionService {
     });
   }
 
-  async transcribeAudio(audioBuffer: Buffer, format: string = 'wav', speakersExpected: number = 2): Promise<string> {
+  async transcribeAudio(audioBuffer: Buffer, format: string = 'wav', speakersExpected: number = 2): Promise<{transcription: string; title?: string; summary?: string}> {
     try {
+      let transcription: string;
+      
       // Try AssemblyAI first
       if (process.env.ASSEMBLYAI_API_KEY) {
-        return await this.transcribeWithAssemblyAI(audioBuffer, format, speakersExpected);
+        transcription = await this.transcribeWithAssemblyAI(audioBuffer, format, speakersExpected);
+      } else {
+        // Fallback to Whisper if AssemblyAI key not available
+        transcription = await this.transcribeWithWhisper(audioBuffer, format);
       }
       
-      // Fallback to Whisper if AssemblyAI key not available
-      return await this.transcribeWithWhisper(audioBuffer, format);
+      // Generate title and summary
+      const { title, summary } = await this.generateTitleAndSummary(transcription);
+      
+      return { transcription, title, summary };
     } catch (error: any) {
       console.error('Error transcribing audio:', error);
       console.error('Error details:', error.message, error.status);
       
       // If all fails, return simulated transcription
-      return this.getSimulatedTranscription();
+      const transcription = this.getSimulatedTranscription();
+      return { transcription, title: 'Untitled Recording', summary: 'Failed to generate summary.' };
     }
   }
 
@@ -158,9 +166,72 @@ class TranscriptionService {
     return simulatedTexts[Math.floor(Math.random() * simulatedTexts.length)];
   }
 
-  async transcribeChunks(chunks: Buffer[]): Promise<string> {
+  async transcribeChunks(chunks: Buffer[]): Promise<{transcription: string; title?: string; summary?: string}> {
     const combinedBuffer = Buffer.concat(chunks);
     return this.transcribeAudio(combinedBuffer);
+  }
+
+  private async generateTitleAndSummary(transcription: string): Promise<{title: string; summary: string}> {
+    try {
+      // Don't generate for very short transcriptions
+      if (transcription.length < 50) {
+        return {
+          title: 'Brief Note',
+          summary: transcription.substring(0, 100)
+        };
+      }
+
+      const completion = await this.openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a helpful assistant that creates concise titles and summaries for transcribed conversations or notes.'
+          },
+          {
+            role: 'user',
+            content: `Based on the following transcription, generate:
+1. A short, descriptive title (max 50 characters)
+2. A 2-3 sentence summary highlighting the key points
+
+Transcription:
+${transcription.substring(0, 3000)} // Limit context to save tokens
+
+Please respond in the following JSON format:
+{
+  "title": "Your title here",
+  "summary": "Your 2-3 sentence summary here"
+}`
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 200,
+        response_format: { type: "json_object" }
+      });
+
+      const response = completion.choices[0].message.content;
+      if (response) {
+        const parsed = JSON.parse(response);
+        return {
+          title: parsed.title || 'Untitled',
+          summary: parsed.summary || 'No summary available.'
+        };
+      }
+
+      return {
+        title: 'Untitled Recording',
+        summary: 'Unable to generate summary.'
+      };
+    } catch (error) {
+      console.error('Error generating title and summary:', error);
+      // Fallback to basic extraction
+      const firstLine = transcription.split('\n')[0];
+      const title = firstLine.substring(0, 50).trim() || 'Untitled Recording';
+      const words = transcription.split(' ');
+      const summary = words.slice(0, 50).join(' ') + (words.length > 50 ? '...' : '');
+      
+      return { title, summary };
+    }
   }
 }
 

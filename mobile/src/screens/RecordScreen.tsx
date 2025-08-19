@@ -26,6 +26,8 @@ const { width } = Dimensions.get('window');
 interface Transcript {
   id: string;
   text: string;
+  title?: string;
+  summary?: string;
   timestamp: Date;
   isExpanded?: boolean;
   path?: string; // ZeroEntropy document path when available
@@ -118,6 +120,8 @@ export default function RecordScreen({ route }: any) {
         const formattedTranscripts: Transcript[] = recentTranscripts.map((t: any) => ({
           id: t.id,
           text: t.text,
+          title: t.title,
+          summary: t.summary,
           timestamp: new Date(t.timestamp),
           path: t.path, // present for ZeroEntropy documents
         }));
@@ -150,6 +154,8 @@ export default function RecordScreen({ route }: any) {
         const newTranscript: Transcript = {
           id: uuid.v4() as string,
           text: response.transcription,
+          title: response.title,
+          summary: response.summary,
           timestamp: new Date(response.timestamp),
         };
         
@@ -491,9 +497,14 @@ export default function RecordScreen({ route }: any) {
                           size={16} 
                           color={colors.primary.main} 
                         />
-                        <Text style={styles.transcriptTime}>
-                          {transcript.timestamp.toLocaleString()}
-                        </Text>
+                        <View style={styles.titleContainer}>
+                          <Text style={styles.transcriptTitle}>
+                            {transcript.title || 'Untitled Recording'}
+                          </Text>
+                          <Text style={styles.transcriptTime}>
+                            {transcript.timestamp.toLocaleString()}
+                          </Text>
+                        </View>
                       </View>
                       <TouchableOpacity
                         style={styles.deleteButton}
@@ -503,12 +514,16 @@ export default function RecordScreen({ route }: any) {
                         <Ionicons name="trash-outline" size={16} color={colors.accent.error} />
                       </TouchableOpacity>
                     </View>
-                    <Text 
-                      style={styles.transcriptText} 
-                      numberOfLines={transcript.isExpanded ? undefined : 2}
-                    >
-                      {transcript.text}
-                    </Text>
+                    {!transcript.isExpanded && transcript.summary && (
+                      <Text style={styles.transcriptSummary} numberOfLines={2}>
+                        {transcript.summary}
+                      </Text>
+                    )}
+                    {transcript.isExpanded && (
+                      <Text style={styles.transcriptText}>
+                        {transcript.text}
+                      </Text>
+                    )}
                   </LinearGradient>
                 </TouchableOpacity>
               ))
@@ -671,6 +686,22 @@ const styles = StyleSheet.create({
     padding: spacing.xs,
     borderRadius: borderRadius.sm,
     backgroundColor: `${colors.accent.error}10`,
+  },
+  titleContainer: {
+    flex: 1,
+    marginLeft: spacing.sm,
+  },
+  transcriptTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginBottom: 2,
+  },
+  transcriptSummary: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    marginTop: spacing.sm,
+    lineHeight: 20,
   },
   transcriptText: {
     ...typography.body,

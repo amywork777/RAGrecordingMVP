@@ -2,6 +2,8 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
 
 interface TranscriptionResponse {
   transcription: string;
+  title?: string;
+  summary?: string;
   recordingId: string;
   timestamp: string;
   // AssemblyAI may return transcription with speaker labels
