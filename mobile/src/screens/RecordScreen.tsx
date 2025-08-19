@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import BLEService from '../services/BLEService';
 import APIService from '../services/APIService';
+import AudioRecordingService from '../services/AudioRecordingService';
 import uuid from 'react-native-uuid';
 
 interface Transcript {
@@ -114,16 +115,54 @@ export default function RecordScreen() {
     }
   };
 
-  const toggleRecording = () => {
+  const toggleRecording = async () => {
     if (isRecording) {
-      BLEService.stopAudioStream();
-      setIsRecording(false);
-      setCurrentRecordingId('');
+      // Stop recording
+      try {
+        setIsLoading(true);
+        
+        // Stop the recording and get the audio file URI
+        const audioUri = await AudioRecordingService.stopRecording();
+        
+        if (audioUri) {
+          // Get the audio data
+          const audioData = await AudioRecordingService.getRecordingData();
+          
+          if (audioData) {
+            // Send to backend for transcription
+            const response = await APIService.sendAudioChunk(audioData, currentRecordingId);
+            
+            if (response.transcription) {
+              console.log('Transcription received:', response.transcription);
+              
+              // The backend will store it in ZeroEntropy
+              // Reload transcripts to show the new one
+              setTimeout(loadTranscriptsFromBackend, 2000);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to stop recording:', error);
+        Alert.alert('Error', 'Failed to process recording');
+      } finally {
+        setIsLoading(false);
+        setIsRecording(false);
+        setCurrentRecordingId('');
+      }
     } else {
-      const recordingId = uuid.v4() as string;
-      setCurrentRecordingId(recordingId);
-      BLEService.startAudioStream();
-      setIsRecording(true);
+      // Start recording
+      try {
+        const recordingId = uuid.v4() as string;
+        setCurrentRecordingId(recordingId);
+        
+        await AudioRecordingService.startRecording();
+        setIsRecording(true);
+        console.log('Audio recording started');
+      } catch (error) {
+        console.error('Failed to start recording:', error);
+        Alert.alert('Recording Error', 'Failed to start recording. Please check microphone permissions.');
+        setIsRecording(false);
+      }
     }
   };
 
@@ -140,35 +179,22 @@ export default function RecordScreen() {
       </View>
 
       <View style={styles.controls}>
-        {!isConnected ? (
-          <TouchableOpacity
-            style={styles.connectButton}
-            onPress={connectToDevice}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>Connect to Device</Text>
-            )}
-          </TouchableOpacity>
-        ) : (
-          <>
-            <TouchableOpacity
-              style={[styles.recordButton, isRecording && styles.recordingActive]}
-              onPress={toggleRecording}
-            >
-              <Text style={styles.buttonText}>
-                {isRecording ? 'Stop Recording' : 'Start Recording'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.disconnectButton}
-              onPress={disconnectDevice}
-            >
-              <Text style={styles.buttonText}>Disconnect</Text>
-            </TouchableOpacity>
-          </>
+        <TouchableOpacity
+          style={[styles.recordButton, isRecording && styles.recordingActive]}
+          onPress={toggleRecording}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>
+              {isRecording ? 'Stop Recording' : 'Start Recording'}
+            </Text>
+          )}
+        </TouchableOpacity>
+        
+        {isRecording && (
+          <Text style={styles.recordingIndicator}>Recording in progress...</Text>
         )}
       </View>
 
@@ -270,6 +296,12 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: 'bold',
+  },
+  recordingIndicator: {
+    color: '#f44336',
+    fontSize: 14,
+    marginTop: 10,
     fontWeight: 'bold',
   },
   transcriptContainer: {

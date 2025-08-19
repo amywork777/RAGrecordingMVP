@@ -16,12 +16,16 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
     
     const transcription = await TranscriptionService.transcribeAudio(req.file.buffer);
     
+    console.log('Transcription result:', transcription.substring(0, 100) + '...');
+    
     const documentId = await ZeroEntropyService.storeDocument(transcription, {
       recordingId: recordingId || 'unknown',
       timestamp: new Date().toISOString(),
       audioSize: req.file.size,
       mimeType: req.file.mimetype,
     });
+    
+    console.log('Document stored with ID:', documentId);
 
     res.json({
       transcription,

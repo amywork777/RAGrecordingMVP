@@ -13,8 +13,16 @@ class TranscriptionService {
 
   async transcribeAudio(audioBuffer: Buffer, format: string = 'wav'): Promise<string> {
     try {
-      const tempFilePath = path.join('/tmp', `audio_${Date.now()}.${format}`);
+      // Create temp directory if it doesn't exist
+      const tempDir = './temp';
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir);
+      }
+      
+      const tempFilePath = path.join(tempDir, `audio_${Date.now()}.${format}`);
       fs.writeFileSync(tempFilePath, audioBuffer);
+
+      console.log('Transcribing audio file:', tempFilePath);
 
       const transcription = await this.openai.audio.transcriptions.create({
         file: fs.createReadStream(tempFilePath),
@@ -22,12 +30,16 @@ class TranscriptionService {
         language: 'en',
       });
 
+      // Clean up temp file
       fs.unlinkSync(tempFilePath);
 
+      console.log('Transcription result:', transcription.text);
       return transcription.text;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error transcribing audio with OpenAI:', error);
+      console.error('Error details:', error.message, error.status);
       
+      // If OpenAI fails, return simulated transcription
       return this.getSimulatedTranscription();
     }
   }

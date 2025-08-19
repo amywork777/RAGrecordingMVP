@@ -30,37 +30,27 @@ class ZeroEntropyService {
   }
 
   async storeDocument(text: string, metadata: any): Promise<string> {
-    if (this.useMockData) {
-      const documentId = await MockDataService.addTranscript(text, metadata.recordingId);
-      console.log(`Document stored in mock database: ${documentId}`);
-      return documentId;
-    }
-
     const documentId = uuidv4();
     
-    const document: Document = {
-      id: documentId,
-      text,
-      metadata: {
-        ...metadata,
-        timestamp: new Date().toISOString(),
-      },
-    };
-
     try {
-      const response = await fetch(`${this.baseUrl}/projects/${this.projectId}/documents`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
+      // Try to use real ZeroEntropy API
+      const ZeroEntropy = (await import('zeroentropy')).default;
+      const client = new ZeroEntropy({ apiKey: this.apiKey });
+      
+      await client.documents.add({
+        collection_name: 'ai-wearable-transcripts',
+        path: `recordings/recording-${documentId}.txt`,
+        content: {
+          type: 'text',
+          text: text,
         },
-        body: JSON.stringify(document),
+        metadata: {
+          ...metadata,
+          timestamp: new Date().toISOString(),
+          source: 'user-recording',
+        },
       });
-
-      if (!response.ok) {
-        throw new Error(`ZeroEntropy API error: ${response.statusText}`);
-      }
-
+      
       console.log(`Document stored in ZeroEntropy: ${documentId}`);
       return documentId;
     } catch (error) {

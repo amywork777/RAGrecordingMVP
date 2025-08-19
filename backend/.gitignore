@@ -17,3 +17,5 @@ coverage/
 .npm/
 .yarn-integrity
 .cache/
+temp/
+uploads/
