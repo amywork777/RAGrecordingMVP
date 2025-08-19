@@ -38,6 +38,7 @@ export default function RecordScreen({ route }: any) {
   const [currentRecordingId, setCurrentRecordingId] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isUploadingAudio, setIsUploadingAudio] = useState(false);
   const pulseAnim = new Animated.Value(1);
   const [recordingTime, setRecordingTime] = useState(0);
   const [intervalId, setIntervalId] = useState<NodeJS.Timeout | null>(null);
@@ -170,7 +171,7 @@ export default function RecordScreen({ route }: any) {
           const base64Audio = await AudioRecordingService.getRecordingBase64();
           
           if (base64Audio) {
-            const response = await APIService.sendAudioBase64(base64Audio, currentRecordingId);
+            const response = await APIService.sendAudioBase64(base64Audio, currentRecordingId, 'm4a');
             
             if (response.transcription) {
               console.log('Transcription received:', response.transcription);
@@ -241,11 +242,61 @@ export default function RecordScreen({ route }: any) {
     );
   };
 
+  const handleUploadAudio = async () => {
+    try {
+      setIsUploadingAudio(true);
+      const pick = await DocumentPicker.getDocumentAsync({
+        type: ['audio/wav', 'audio/x-m4a', 'audio/m4a', 'audio/mp4', 'audio/*'],
+        multiple: false,
+        copyToCacheDirectory: true,
+      });
+      
+      if (pick.canceled || !pick.assets || pick.assets.length === 0) {
+        return;
+      }
+      
+      const asset = pick.assets[0];
+      const uri = asset.uri;
+      const filename = asset.name || `upload-${Date.now()}.audio`;
+      
+      // Detect format from filename or mime type
+      let format = 'wav';
+      if (filename.toLowerCase().endsWith('.m4a') || asset.mimeType?.includes('m4a')) {
+        format = 'm4a';
+      } else if (filename.toLowerCase().endsWith('.mp3') || asset.mimeType?.includes('mp3')) {
+        format = 'mp3';
+      }
+      
+      console.log(`Uploading audio file: ${filename}, format: ${format}, type: ${asset.mimeType}`);
+
+      // Read the file as base64
+      const base64Audio = await FileSystem.readAsStringAsync(uri, { 
+        encoding: FileSystem.EncodingType.Base64 
+      });
+      
+      // Send to backend for transcription and storage
+      const recordingId = uuid.v4() as string;
+      const response = await APIService.sendAudioBase64(base64Audio, recordingId, format);
+      
+      if (response.transcription) {
+        Alert.alert('Success', `Transcribed and uploaded ${filename} to ZeroEntropy`);
+        console.log('Transcription:', response.transcription);
+        // Reload transcripts to show the new one
+        setTimeout(loadTranscriptsFromBackend, 2000);
+      }
+    } catch (e: any) {
+      console.error('Audio upload failed:', e);
+      Alert.alert('Upload Failed', e?.message || 'Unknown error');
+    } finally {
+      setIsUploadingAudio(false);
+    }
+  };
+
   const handleUploadText = async () => {
     try {
       setIsUploading(true);
       const pick = await DocumentPicker.getDocumentAsync({
-        type: 'text/plain',
+        type: ['text/plain', 'text/*', 'application/text', '*/*'], // More flexible type matching
         multiple: false,
         copyToCacheDirectory: true,
       });
@@ -257,10 +308,20 @@ export default function RecordScreen({ route }: any) {
       const asset = pick.assets[0];
       const uri = asset.uri;
       const filename = asset.name || `upload-${Date.now()}.txt`;
+      
+      console.log('Picked file:', filename, 'URI:', uri, 'Type:', asset.mimeType);
 
       const fileContent = await FileSystem.readAsStringAsync(uri, { 
         encoding: FileSystem.EncodingType.UTF8 
       });
+      
+      console.log('File content length:', fileContent.length);
+      console.log('First 200 chars:', fileContent.substring(0, 200));
+      
+      if (!fileContent || fileContent.trim().length === 0) {
+        Alert.alert('Error', 'File appears to be empty');
+        return;
+      }
       
       const result = await APIService.uploadTextDocument(fileContent, {
         path: `mobile/uploads/${filename}`,
@@ -268,9 +329,11 @@ export default function RecordScreen({ route }: any) {
         collectionName: 'ai-wearable-transcripts',
       });
       
-      Alert.alert('Success', `Uploaded ${filename} to ZeroEntropy`);
+      Alert.alert('Success', `Uploaded ${filename} to ZeroEntropy\n${fileContent.length} characters`);
       console.log('Upload result:', result);
-      loadTranscriptsFromBackend();
+      
+      // Reload transcripts after a delay to ensure it's processed
+      setTimeout(loadTranscriptsFromBackend, 2000);
     } catch (e: any) {
       console.error('Upload failed:', e);
       Alert.alert('Upload Failed', e?.message || 'Unknown error');
@@ -334,26 +397,50 @@ export default function RecordScreen({ route }: any) {
             {isRecording ? 'Tap to stop' : 'Tap to record'}
           </Text>
 
-          {/* Upload Text Button - Modern Style */}
-          <TouchableOpacity
-            style={styles.uploadButton}
-            onPress={handleUploadText}
-            disabled={isUploading}
-          >
-            <LinearGradient
-              colors={[colors.secondary.dark, colors.secondary.main]}
-              style={styles.uploadGradient}
+          {/* Upload Buttons Container */}
+          <View style={styles.uploadButtonsContainer}>
+            {/* Upload Text Button */}
+            <TouchableOpacity
+              style={styles.uploadButton}
+              onPress={handleUploadText}
+              disabled={isUploading}
             >
-              {isUploading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="document-text" size={20} color="#fff" />
-                  <Text style={styles.uploadText}>Upload Text File</Text>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
+              <LinearGradient
+                colors={[colors.secondary.dark, colors.secondary.main]}
+                style={styles.uploadGradient}
+              >
+                {isUploading ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="document-text" size={18} color="#fff" />
+                    <Text style={styles.uploadText}>Text File</Text>
+                  </>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+
+            {/* Upload WAV Button */}
+            <TouchableOpacity
+              style={styles.uploadButton}
+              onPress={handleUploadAudio}
+              disabled={isUploadingAudio}
+            >
+              <LinearGradient
+                colors={[colors.primary.dark, colors.primary.main]}
+                style={styles.uploadGradient}
+              >
+                {isUploadingAudio ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="musical-notes" size={18} color="#fff" />
+                    <Text style={styles.uploadText}>Audio File</Text>
+                  </>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.transcriptsSection}>
@@ -508,21 +595,29 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     fontSize: 14,
   },
-  uploadButton: {
+  uploadButtonsContainer: {
+    flexDirection: 'row',
     marginTop: spacing.xl,
+    gap: spacing.md,
+    justifyContent: 'center',
+  },
+  uploadButton: {
+    flex: 1,
+    maxWidth: 140,
   },
   uploadGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.lg,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
     paddingVertical: 12,
     borderRadius: borderRadius.xl,
-    gap: spacing.sm,
+    gap: spacing.xs,
   },
   uploadText: {
     color: '#fff',
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: 13,
   },
   transcriptsSection: {
     flex: 1,

@@ -14,8 +14,17 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
 
     const { recordingId } = req.body;
     
-    // Detect audio format from mimetype
-    const format = req.file.mimetype.includes('m4a') || req.file.originalname?.includes('.m4a') ? 'm4a' : 'wav';
+    // Detect audio format from mimetype or filename
+    let format = 'wav'; // default
+    if (req.file.mimetype.includes('m4a') || req.file.originalname?.includes('.m4a')) {
+      format = 'm4a';
+    } else if (req.file.mimetype.includes('wav') || req.file.originalname?.includes('.wav')) {
+      format = 'wav';
+    } else if (req.file.mimetype.includes('mp3') || req.file.originalname?.includes('.mp3')) {
+      format = 'mp3';
+    }
+    
+    console.log(`Processing audio file: ${req.file.originalname}, format: ${format}, size: ${req.file.size} bytes`);
     const transcription = await TranscriptionService.transcribeAudio(req.file.buffer, format);
     
     console.log('Transcription result:', transcription.substring(0, 100) + '...');

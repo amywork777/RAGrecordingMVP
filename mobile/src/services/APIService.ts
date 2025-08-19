@@ -26,14 +26,17 @@ interface SearchResponse {
 }
 
 class APIService {
-  async sendAudioBase64(base64Audio: string, recordingId: string): Promise<TranscriptionResponse> {
+  async sendAudioBase64(base64Audio: string, recordingId: string, format: string = 'm4a'): Promise<TranscriptionResponse> {
     const formData = new FormData();
     
     // Create a file-like object from base64
+    const mimeType = format === 'wav' ? 'audio/wav' : 'audio/m4a';
+    const filename = format === 'wav' ? 'recording.wav' : 'recording.m4a';
+    
     formData.append('audio', {
-      uri: `data:audio/m4a;base64,${base64Audio}`,
-      type: 'audio/m4a',
-      name: 'recording.m4a',
+      uri: `data:${mimeType};base64,${base64Audio}`,
+      type: mimeType,
+      name: filename,
     } as any);
     formData.append('recordingId', recordingId);
 

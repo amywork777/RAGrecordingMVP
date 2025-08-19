@@ -203,6 +203,12 @@ router.post('/upload-text', async (req: Request, res: Response) => {
     }
 
     const client = getZeroEntropyClient();
+    
+    console.log(`Uploading text document to ZeroEntropy:`);
+    console.log(`- Path: ${path}`);
+    console.log(`- Collection: ${collection_name}`);
+    console.log(`- Text length: ${text.length} characters`);
+    console.log(`- First 100 chars: ${text.substring(0, 100)}...`);
 
     const response = await client.documents.add({
       collection_name,
@@ -216,12 +222,15 @@ router.post('/upload-text', async (req: Request, res: Response) => {
         ...metadata,
       } as any,
     } as any);
+    
+    console.log('Document successfully uploaded to ZeroEntropy:', response);
 
     res.json({
       message: 'Document uploaded to ZeroEntropy',
       response,
       path,
       collection_name,
+      textLength: text.length,
     });
   } catch (error: any) {
     console.error('Error uploading text to ZeroEntropy:', error);
