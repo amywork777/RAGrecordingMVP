@@ -106,6 +106,32 @@ class APIService {
 
     return response.json();
   }
+
+  async uploadTextDocument(
+    text: string,
+    options?: { path?: string; metadata?: Record<string, any>; collectionName?: string }
+  ): Promise<any> {
+    const body: any = {
+      text,
+    };
+    if (options?.path) body.path = options.path;
+    if (options?.metadata) body.metadata = options.metadata;
+    if (options?.collectionName) body.collection_name = options.collectionName;
+
+    const response = await fetch(`${API_BASE_URL}/api/zeroentropy/upload-text`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to upload document: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
 }
 
 export default new APIService();

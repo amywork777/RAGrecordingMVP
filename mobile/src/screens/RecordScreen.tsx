@@ -12,6 +12,8 @@ import BLEService from '../services/BLEService';
 import APIService from '../services/APIService';
 import AudioRecordingService from '../services/AudioRecordingService';
 import uuid from 'react-native-uuid';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 
 interface Transcript {
   id: string;
@@ -196,6 +198,41 @@ export default function RecordScreen() {
         {isRecording && (
           <Text style={styles.recordingIndicator}>Recording in progress...</Text>
         )}
+
+        {/* Upload Text to ZeroEntropy */}
+        <TouchableOpacity
+          style={styles.uploadButton}
+          onPress={async () => {
+            try {
+              const pick = await DocumentPicker.getDocumentAsync({
+                type: 'text/plain',
+                multiple: false,
+                copyToCacheDirectory: true,
+              });
+              if (pick.canceled || !pick.assets || pick.assets.length === 0) {
+                return;
+              }
+              const asset = pick.assets[0];
+              const uri = asset.uri;
+              const filename = asset.name || `upload-${Date.now()}.txt`;
+
+              const fileContent = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.UTF8 });
+              const result = await APIService.uploadTextDocument(fileContent, {
+                path: `mobile/uploads/${filename}`,
+                metadata: { source: 'mobile', filename },
+                collectionName: 'ai-wearable-transcripts',
+              });
+              Alert.alert('Uploaded', `Uploaded ${filename} to ZeroEntropy`);
+              console.log('Upload result:', result);
+              loadTranscriptsFromBackend();
+            } catch (e: any) {
+              console.error('Upload failed:', e);
+              Alert.alert('Upload Failed', e?.message || 'Unknown error');
+            }
+          }}
+        >
+          <Text style={styles.buttonText}>Upload Text</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.transcriptContainer}>
@@ -292,6 +329,15 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     minWidth: 200,
     alignItems: 'center',
+  },
+  uploadButton: {
+    backgroundColor: '#6A5ACD',
+    paddingHorizontal: 30,
+    paddingVertical: 15,
+    borderRadius: 25,
+    minWidth: 200,
+    alignItems: 'center',
+    marginTop: 10,
   },
   buttonText: {
     color: '#fff',
