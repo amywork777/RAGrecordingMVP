@@ -4,6 +4,8 @@ interface TranscriptionResponse {
   transcription: string;
   recordingId: string;
   timestamp: string;
+  // AssemblyAI may return transcription with speaker labels
+  hasDiarization?: boolean;
 }
 
 interface SearchResult {

@@ -12,7 +12,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       return res.status(400).json({ error: 'No audio file provided' });
     }
 
-    const { recordingId } = req.body;
+    const { recordingId, speakersExpected } = req.body;
     
     // Detect audio format from mimetype or filename
     let format = 'wav'; // default
@@ -24,8 +24,9 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       format = 'mp3';
     }
     
-    console.log(`Processing audio file: ${req.file.originalname}, format: ${format}, size: ${req.file.size} bytes`);
-    const transcription = await TranscriptionService.transcribeAudio(req.file.buffer, format);
+    const speakers = speakersExpected ? parseInt(speakersExpected) : 2;
+    console.log(`Processing audio file: ${req.file.originalname}, format: ${format}, size: ${req.file.size} bytes, speakers: ${speakers}`);
+    const transcription = await TranscriptionService.transcribeAudio(req.file.buffer, format, speakers);
     
     console.log('Transcription result:', transcription.substring(0, 100) + '...');
     
@@ -43,6 +44,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       documentId,
       recordingId,
       timestamp: new Date().toISOString(),
+      hasDiarization: transcription.includes('Speaker '), // Check if diarization was applied
     });
   } catch (error) {
     console.error('Transcription error:', error);
@@ -72,6 +74,7 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
       documentId,
       recordingId,
       timestamp: new Date().toISOString(),
+      hasDiarization: transcription.includes('Speaker '), // Check if diarization was applied
     });
   } catch (error) {
     console.error('Batch transcription error:', error);
