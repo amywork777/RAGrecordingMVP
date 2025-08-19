@@ -123,6 +123,7 @@ npm install
 npx expo start
 ```
 - If you run on an iOS/Android simulator, `localhost` will generally work out of the box.
+- After the dev server starts, press `i` in the terminal to launch the iOS Simulator.
 - If you run on a physical device and it loads fine, you can stop here.
 
 4. If the app shows “Network request failed” on a physical device, configure the API endpoint:
@@ -353,6 +354,44 @@ const searchResults = await zeroEntropy.search("What about the roadmap?");
    - You likely ran it at the repo root. Change into the correct directory first:
      - Backend: `cd backend && npm run dev`
      - Mobile: `cd mobile && npx expo start`
+
+5. **iOS Simulator cannot boot (cannot determine the runtime bundle)**:
+   - Ensure Xcode is installed and initialized:
+     - Install/Update Xcode (App Store)
+     - Open Xcode once to finish components install
+     - Xcode → Settings → Platforms → ensure an iOS Simulator runtime is installed
+   - Point CLI to Xcode and accept license:
+     ```bash
+     xcode-select -p
+     sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+     sudo xcodebuild -license accept
+     ```
+   - Reset simulators and boot a valid device:
+     ```bash
+     killall Simulator || true
+     killall -9 com.apple.CoreSimulator.CoreSimulatorService || true
+     xcrun simctl list runtimes
+     xcrun simctl list devices
+     open -a Simulator
+     # Optional: wipe all
+     xcrun simctl erase all
+     ```
+   - Start Expo and launch iOS:
+     ```bash
+     cd mobile
+     npx expo start --lan
+     # press i to open iOS simulator
+     ```
+     If it still errors, manually boot a listed device:
+     ```bash
+     xcrun simctl boot "iPhone 15 Pro"
+     open -a Simulator
+     ```
+   - Temporary fallback: run on a physical device with Expo Go:
+     ```bash
+     npx expo start --lan
+     # scan the QR code on your phone
+     ```
 
 ## License
 
