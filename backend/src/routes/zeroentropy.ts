@@ -193,4 +193,29 @@ router.get('/status', async (req: Request, res: Response) => {
   }
 });
 
+// Delete a document from ZeroEntropy
+router.delete('/documents/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const client = getZeroEntropyClient();
+    
+    console.log(`Deleting document ${id} from ZeroEntropy...`);
+    
+    // Since ZeroEntropy uses paths, we need to find the document path by ID
+    // For now, we'll use the ID as the path
+    await client.documents.delete({
+      collection_name: 'ai-wearable-transcripts',
+      path: id,
+    });
+    
+    res.json({ success: true, message: 'Document deleted successfully' });
+  } catch (error: any) {
+    console.error('Error deleting document:', error);
+    res.status(500).json({ 
+      error: 'Failed to delete document', 
+      details: error.message 
+    });
+  }
+});
+
 export default router;

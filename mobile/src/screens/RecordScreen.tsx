@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,44 +7,110 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  SafeAreaView,
+  Animated,
+  Dimensions,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import BLEService from '../services/BLEService';
 import APIService from '../services/APIService';
 import AudioRecordingService from '../services/AudioRecordingService';
 import uuid from 'react-native-uuid';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
+import { colors, spacing, borderRadius, typography } from '../theme/colors';
+
+const { width } = Dimensions.get('window');
 
 interface Transcript {
   id: string;
   text: string;
   timestamp: Date;
+  isExpanded?: boolean;
 }
 
-export default function RecordScreen() {
+export default function RecordScreen({ route }: any) {
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [currentRecordingId, setCurrentRecordingId] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const pulseAnim = new Animated.Value(1);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [intervalId, setIntervalId] = useState<NodeJS.Timeout | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     BLEService.on('deviceConnected', handleDeviceConnected);
     BLEService.on('deviceDisconnected', handleDeviceDisconnected);
     BLEService.on('audioChunk', handleAudioChunk);
 
-    // Load existing transcripts from backend on mount
     loadTranscriptsFromBackend();
 
     return () => {
       BLEService.removeAllListeners();
+      if (intervalId) clearInterval(intervalId);
     };
   }, [currentRecordingId]);
 
+  // Handle navigation from Chat screen
+  useEffect(() => {
+    if (route?.params?.transcriptId) {
+      setHighlightedId(route.params.transcriptId);
+      // Scroll to the transcript after a short delay
+      setTimeout(() => {
+        const index = transcripts.findIndex(t => t.id === route.params.transcriptId);
+        if (index !== -1) {
+          // Expand the transcript
+          toggleExpand(route.params.transcriptId);
+        }
+      }, 500);
+    }
+  }, [route?.params?.transcriptId, transcripts]);
+
+  useEffect(() => {
+    if (isRecording) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.2,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+
+      const timer = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+      setIntervalId(timer);
+    } else {
+      pulseAnim.setValue(1);
+      if (intervalId) {
+        clearInterval(intervalId);
+        setIntervalId(null);
+      }
+      setRecordingTime(0);
+    }
+  }, [isRecording]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const loadTranscriptsFromBackend = async () => {
     try {
-      console.log('Loading transcripts from backend...');
-      const recentTranscripts = await APIService.getRecentTranscripts(50); // Get more transcripts
+      const recentTranscripts = await APIService.getRecentTranscripts(50);
       
       if (recentTranscripts && recentTranscripts.length > 0) {
         const formattedTranscripts: Transcript[] = recentTranscripts.map((t: any) => ({
@@ -54,7 +120,6 @@ export default function RecordScreen() {
         }));
         
         setTranscripts(formattedTranscripts);
-        console.log(`Loaded ${formattedTranscripts.length} transcripts from backend`);
       }
     } catch (error) {
       console.error('Error loading transcripts:', error);
@@ -76,7 +141,7 @@ export default function RecordScreen() {
     if (!currentRecordingId) return;
 
     try {
-      const response = await APIService.sendAudioChunk(audioData, currentRecordingId);
+      const response = await APIService.sendAudioBase64(audioData.toString(), currentRecordingId);
       
       if (response.transcription) {
         const newTranscript: Transcript = {
@@ -85,60 +150,28 @@ export default function RecordScreen() {
           timestamp: new Date(response.timestamp),
         };
         
-        setTranscripts(prev => [...prev, newTranscript]);
+        setTranscripts(prev => [newTranscript, ...prev]);
       }
     } catch (error) {
       console.error('Error processing audio chunk:', error);
     }
   };
 
-  const connectToDevice = async () => {
-    setIsLoading(true);
-    try {
-      const devices = await BLEService.scanForDevices();
-      if (devices.length > 0) {
-        await BLEService.connectToDevice(devices[0].id);
-      } else {
-        Alert.alert('No Devices', 'No AI Wearable devices found');
-      }
-    } catch (error) {
-      Alert.alert('Connection Error', 'Failed to connect to device');
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const disconnectDevice = async () => {
-    try {
-      await BLEService.disconnectDevice();
-    } catch (error) {
-      console.error('Error disconnecting:', error);
-    }
-  };
-
   const toggleRecording = async () => {
     if (isRecording) {
-      // Stop recording
       try {
         setIsLoading(true);
         
-        // Stop the recording and get the audio file URI
         const audioUri = await AudioRecordingService.stopRecording();
         
         if (audioUri) {
-          // Get the audio data as base64
           const base64Audio = await AudioRecordingService.getRecordingBase64();
           
           if (base64Audio) {
-            // Send to backend for transcription
             const response = await APIService.sendAudioBase64(base64Audio, currentRecordingId);
             
             if (response.transcription) {
               console.log('Transcription received:', response.transcription);
-              
-              // The backend will store it in ZeroEntropy
-              // Reload transcripts to show the new one
               setTimeout(loadTranscriptsFromBackend, 2000);
             }
           }
@@ -152,7 +185,6 @@ export default function RecordScreen() {
         setCurrentRecordingId('');
       }
     } else {
-      // Start recording
       try {
         const recordingId = uuid.v4() as string;
         setCurrentRecordingId(recordingId);
@@ -168,237 +200,403 @@ export default function RecordScreen() {
     }
   };
 
-  return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>AI Wearable Recorder</Text>
-        <View style={styles.connectionStatus}>
-          <View style={[styles.statusDot, isConnected ? styles.connected : styles.disconnected]} />
-          <Text style={styles.statusText}>
-            {isConnected ? 'Connected' : 'Disconnected'}
-          </Text>
-        </View>
-      </View>
+  const toggleExpand = (id: string) => {
+    setTranscripts(prev => prev.map(t => 
+      t.id === id ? { ...t, isExpanded: !t.isExpanded } : t
+    ));
+  };
 
-      <View style={styles.controls}>
-        <TouchableOpacity
-          style={[styles.recordButton, isRecording && styles.recordingActive]}
-          onPress={toggleRecording}
-          disabled={isLoading}
-        >
-          {isLoading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>
-              {isRecording ? 'Stop Recording' : 'Start Recording'}
-            </Text>
-          )}
-        </TouchableOpacity>
-        
-        {isRecording && (
-          <Text style={styles.recordingIndicator}>Recording in progress...</Text>
-        )}
-
-        {/* Upload Text to ZeroEntropy */}
-        <TouchableOpacity
-          style={styles.uploadButton}
-          onPress={async () => {
+  const deleteTranscript = async (id: string) => {
+    Alert.alert(
+      'Delete Recording',
+      'Are you sure you want to delete this recording?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
             try {
-              const pick = await DocumentPicker.getDocumentAsync({
-                type: 'text/plain',
-                multiple: false,
-                copyToCacheDirectory: true,
-              });
-              if (pick.canceled || !pick.assets || pick.assets.length === 0) {
-                return;
-              }
-              const asset = pick.assets[0];
-              const uri = asset.uri;
-              const filename = asset.name || `upload-${Date.now()}.txt`;
-
-              const fileContent = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.UTF8 });
-              const result = await APIService.uploadTextDocument(fileContent, {
-                path: `mobile/uploads/${filename}`,
-                metadata: { source: 'mobile', filename },
-                collectionName: 'ai-wearable-transcripts',
-              });
-              Alert.alert('Uploaded', `Uploaded ${filename} to ZeroEntropy`);
-              console.log('Upload result:', result);
+              // Remove from local state immediately
+              setTranscripts(prev => prev.filter(t => t.id !== id));
+              
+              // Delete from ZeroEntropy backend
+              await APIService.deleteTranscript(id);
+              console.log(`Successfully deleted transcript ${id}`);
+            } catch (error) {
+              console.error('Error deleting transcript:', error);
+              Alert.alert('Error', 'Failed to delete recording');
+              // Reload in case of error
               loadTranscriptsFromBackend();
-            } catch (e: any) {
-              console.error('Upload failed:', e);
-              Alert.alert('Upload Failed', e?.message || 'Unknown error');
             }
-          }}
-        >
-          <Text style={styles.buttonText}>Upload Text</Text>
-        </TouchableOpacity>
-      </View>
+          }
+        }
+      ]
+    );
+  };
 
-      <ScrollView style={styles.transcriptContainer}>
-        <View style={styles.transcriptHeader}>
-          <Text style={styles.sectionTitle}>All Transcripts</Text>
+  const handleUploadText = async () => {
+    try {
+      setIsUploading(true);
+      const pick = await DocumentPicker.getDocumentAsync({
+        type: 'text/plain',
+        multiple: false,
+        copyToCacheDirectory: true,
+      });
+      
+      if (pick.canceled || !pick.assets || pick.assets.length === 0) {
+        return;
+      }
+      
+      const asset = pick.assets[0];
+      const uri = asset.uri;
+      const filename = asset.name || `upload-${Date.now()}.txt`;
+
+      const fileContent = await FileSystem.readAsStringAsync(uri, { 
+        encoding: FileSystem.EncodingType.UTF8 
+      });
+      
+      const result = await APIService.uploadTextDocument(fileContent, {
+        path: `mobile/uploads/${filename}`,
+        metadata: { source: 'mobile', filename },
+        collectionName: 'ai-wearable-transcripts',
+      });
+      
+      Alert.alert('Success', `Uploaded ${filename} to ZeroEntropy`);
+      console.log('Upload result:', result);
+      loadTranscriptsFromBackend();
+    } catch (e: any) {
+      console.error('Upload failed:', e);
+      Alert.alert('Upload Failed', e?.message || 'Unknown error');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <LinearGradient
+        colors={[colors.background.primary, colors.background.secondary]}
+        style={styles.gradient}
+      >
+        <View style={styles.header}>
+          <Text style={styles.title}>Welcome to Tai</Text>
+          {isRecording && (
+            <View style={styles.recordingBadge}>
+              <View style={styles.recordingDot} />
+              <Text style={styles.recordingTime}>{formatTime(recordingTime)}</Text>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.recordContainer}>
           <TouchableOpacity
-            style={styles.refreshButton}
-            onPress={loadTranscriptsFromBackend}
+            style={styles.recordButtonWrapper}
+            onPress={toggleRecording}
+            disabled={isLoading}
           >
-            <Text style={styles.refreshButtonText}>Refresh</Text>
+            <Animated.View
+              style={[
+                styles.pulseCircle,
+                {
+                  transform: [{ scale: pulseAnim }],
+                  opacity: isRecording ? 0.3 : 0,
+                },
+              ]}
+            />
+            <LinearGradient
+              colors={
+                isRecording 
+                  ? [colors.accent.error, '#DC2626']
+                  : [colors.primary.main, colors.secondary.main]
+              }
+              style={styles.recordButton}
+            >
+              {isLoading ? (
+                <ActivityIndicator color="#fff" size="large" />
+              ) : (
+                <Ionicons 
+                  name={isRecording ? 'stop' : 'mic'} 
+                  size={32} 
+                  color="#fff" 
+                />
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+          
+          <Text style={styles.recordHint}>
+            {isRecording ? 'Tap to stop' : 'Tap to record'}
+          </Text>
+
+          {/* Upload Text Button - Modern Style */}
+          <TouchableOpacity
+            style={styles.uploadButton}
+            onPress={handleUploadText}
+            disabled={isUploading}
+          >
+            <LinearGradient
+              colors={[colors.secondary.dark, colors.secondary.main]}
+              style={styles.uploadGradient}
+            >
+              {isUploading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="document-text" size={20} color="#fff" />
+                  <Text style={styles.uploadText}>Upload Text File</Text>
+                </>
+              )}
+            </LinearGradient>
           </TouchableOpacity>
         </View>
-        {transcripts.length === 0 ? (
-          <Text style={styles.emptyText}>No transcripts yet. Loading from storage...</Text>
-        ) : (
-          transcripts.map((transcript) => (
-            <View key={transcript.id} style={styles.transcriptItem}>
-              <Text style={styles.transcriptTime}>
-                {transcript.timestamp.toLocaleTimeString()}
-              </Text>
-              <Text style={styles.transcriptText}>{transcript.text}</Text>
-            </View>
-          ))
-        )}
-      </ScrollView>
-    </View>
+
+        <View style={styles.transcriptsSection}>
+          <View style={styles.transcriptsHeader}>
+            <Text style={styles.sectionTitle}>Recent Transcripts</Text>
+            <TouchableOpacity
+              style={styles.refreshButton}
+              onPress={loadTranscriptsFromBackend}
+            >
+              <Ionicons name="refresh" size={18} color={colors.primary.main} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView 
+            ref={scrollViewRef}
+            style={styles.transcriptsList}
+            showsVerticalScrollIndicator={false}
+          >
+            {transcripts.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="mic-off-outline" size={40} color={colors.text.secondary} />
+                <Text style={styles.emptyText}>No recordings yet</Text>
+                <Text style={styles.emptySubtext}>Tap the mic to start recording</Text>
+              </View>
+            ) : (
+              transcripts.map((transcript) => (
+                <TouchableOpacity 
+                  key={transcript.id} 
+                  style={[
+                    styles.transcriptCard,
+                    highlightedId === transcript.id && styles.highlightedCard
+                  ]}
+                  onPress={() => toggleExpand(transcript.id)}
+                  activeOpacity={0.7}
+                >
+                  <LinearGradient
+                    colors={
+                      highlightedId === transcript.id 
+                        ? [`${colors.primary.main}20`, `${colors.secondary.main}15`]
+                        : [`${colors.primary.main}10`, `${colors.secondary.main}05`]
+                    }
+                    style={styles.cardGradient}
+                  >
+                    <View style={styles.cardHeader}>
+                      <View style={styles.cardHeaderLeft}>
+                        <Ionicons 
+                          name={transcript.isExpanded ? "chevron-down" : "chevron-forward"} 
+                          size={16} 
+                          color={colors.primary.main} 
+                        />
+                        <Text style={styles.transcriptTime}>
+                          {transcript.timestamp.toLocaleString()}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() => deleteTranscript(transcript.id)}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <Ionicons name="trash-outline" size={16} color={colors.accent.error} />
+                      </TouchableOpacity>
+                    </View>
+                    <Text 
+                      style={styles.transcriptText} 
+                      numberOfLines={transcript.isExpanded ? undefined : 2}
+                    >
+                      {transcript.text}
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              ))
+            )}
+          </ScrollView>
+        </View>
+      </LinearGradient>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.background.primary,
+  },
+  gradient: {
+    flex: 1,
   },
   header: {
-    backgroundColor: '#2196F3',
-    padding: 20,
-    paddingTop: 50,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 10,
-  },
-  connectionStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 8,
-  },
-  connected: {
-    backgroundColor: '#4CAF50',
-  },
-  disconnected: {
-    backgroundColor: '#f44336',
-  },
-  statusText: {
-    color: '#fff',
-    fontSize: 16,
-  },
-  controls: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  connectButton: {
-    backgroundColor: '#2196F3',
-    paddingHorizontal: 30,
-    paddingVertical: 15,
-    borderRadius: 25,
-    minWidth: 200,
-    alignItems: 'center',
-  },
-  recordButton: {
-    backgroundColor: '#4CAF50',
-    paddingHorizontal: 30,
-    paddingVertical: 15,
-    borderRadius: 25,
-    minWidth: 200,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  recordingActive: {
-    backgroundColor: '#f44336',
-  },
-  disconnectButton: {
-    backgroundColor: '#757575',
-    paddingHorizontal: 30,
-    paddingVertical: 15,
-    borderRadius: 25,
-    minWidth: 200,
-    alignItems: 'center',
-  },
-  uploadButton: {
-    backgroundColor: '#6A5ACD',
-    paddingHorizontal: 30,
-    paddingVertical: 15,
-    borderRadius: 25,
-    minWidth: 200,
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  recordingIndicator: {
-    color: '#f44336',
-    fontSize: 14,
-    marginTop: 10,
-    fontWeight: 'bold',
-  },
-  transcriptContainer: {
-    flex: 1,
-    padding: 20,
-  },
-  transcriptHeader: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 15,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  recordingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.accent.error,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: borderRadius.full,
+  },
+  recordingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#fff',
+    marginRight: spacing.xs,
+  },
+  recordingTime: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  recordContainer: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+  },
+  recordButtonWrapper: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pulseCircle: {
+    position: 'absolute',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: colors.accent.error,
+  },
+  recordButton: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 8,
+    shadowColor: colors.primary.main,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  recordHint: {
+    marginTop: spacing.md,
+    ...typography.body,
+    color: colors.text.secondary,
+    fontSize: 14,
+  },
+  uploadButton: {
+    marginTop: spacing.xl,
+  },
+  uploadGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 12,
+    borderRadius: borderRadius.xl,
+    gap: spacing.sm,
+  },
+  uploadText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  transcriptsSection: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+  },
+  transcriptsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 20,
+    fontWeight: '600',
+    color: colors.text.primary,
   },
   refreshButton: {
-    backgroundColor: '#2196F3',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 15,
+    padding: 8,
+    backgroundColor: `${colors.primary.main}20`,
+    borderRadius: borderRadius.md,
   },
-  refreshButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
+  transcriptsList: {
+    flex: 1,
   },
-  emptyText: {
-    color: '#999',
-    textAlign: 'center',
-    marginTop: 20,
+  transcriptCard: {
+    marginBottom: spacing.sm,
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
   },
-  transcriptItem: {
-    backgroundColor: '#fff',
-    padding: 15,
-    marginBottom: 10,
-    borderRadius: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+  highlightedCard: {
+    transform: [{ scale: 1.02 }],
   },
-  transcriptTime: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 5,
+  cardGradient: {
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.surface.border,
+    borderRadius: borderRadius.lg,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  cardHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  deleteButton: {
+    padding: spacing.xs,
+    borderRadius: borderRadius.sm,
+    backgroundColor: `${colors.accent.error}10`,
   },
   transcriptText: {
-    fontSize: 16,
-    color: '#333',
+    ...typography.body,
+    color: colors.text.primary,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  transcriptTime: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    fontSize: 12,
+    marginLeft: spacing.xs,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl * 2,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    marginTop: spacing.md,
+  },
+  emptySubtext: {
+    ...typography.body,
+    color: colors.text.disabled,
+    marginTop: spacing.xs,
+    fontSize: 14,
   },
 });

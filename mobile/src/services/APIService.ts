@@ -138,6 +138,18 @@ class APIService {
 
     return response.json();
   }
+
+  async deleteTranscript(id: string): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/api/zeroentropy/documents/${id}`, {
+      method: 'DELETE',
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to delete transcript: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
 }
 
 export default new APIService();

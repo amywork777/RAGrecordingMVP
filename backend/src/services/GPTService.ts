@@ -115,15 +115,23 @@ Rules:
 
       const answer = completion.choices[0]?.message?.content || 'I apologize, but I was unable to generate a response.';
       
-      // Return answer with source citations
+      // Return answer with only the most relevant source
+      const topSource = context.length > 0 ? context[0] : null;
+      const sources = topSource ? [{
+        id: topSource.id || topSource.recordingId || undefined,
+        // Extract a brief 5-6 word quote from the source
+        text: (topSource.text || topSource.content || '')
+          .split(' ')
+          .slice(0, 6)
+          .join(' ') + '...',
+        timestamp: topSource.timestamp,
+        topic: topSource.topic || 'Recording',
+        score: topSource.score,
+      }] : [];
+      
       return {
         answer,
-        sources: context.map(doc => ({
-          text: (doc.text || doc.content || '').substring(0, 100) + '...',
-          timestamp: doc.timestamp,
-          topic: doc.topic || 'Recording',
-          score: doc.score,
-        }))
+        sources
       };
     } catch (error: any) {
       console.error('Error in conversational response:', error);

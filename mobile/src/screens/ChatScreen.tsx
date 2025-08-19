@@ -24,6 +24,7 @@ interface Message {
   timestamp: Date;
   results?: SearchResult[];
   sources?: Array<{
+    id?: string;
     text: string;
     timestamp: string;
     topic: string;
@@ -39,7 +40,7 @@ interface SearchResult {
   score: number;
 }
 
-export default function ChatScreen() {
+export default function ChatScreen({ navigation }: any) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -171,19 +172,25 @@ export default function ChatScreen() {
           
           {message.sources && message.sources.length > 0 && !message.isUser && (
             <View style={styles.sourcesContainer}>
-              <Text style={styles.sourcesTitle}>Sources:</Text>
-              {message.sources.map((source, index) => (
-                <TouchableOpacity key={index} style={styles.sourceChip}>
-                  <Ionicons 
-                    name={source.topic === 'user-recording' ? 'mic' : 'document-text'} 
-                    size={12} 
-                    color={colors.primary.main} 
-                  />
-                  <Text style={styles.sourceText} numberOfLines={1}>
-                    {source.topic || 'Recording'} • {new Date(source.timestamp).toLocaleDateString()}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              <TouchableOpacity 
+                style={styles.sourceChip}
+                onPress={() => {
+                  if (message.sources && message.sources[0]?.id) {
+                    navigation.navigate('Record', { 
+                      transcriptId: message.sources[0].id 
+                    });
+                  }
+                }}
+              >
+                <Ionicons 
+                  name="link" 
+                  size={10} 
+                  color={colors.primary.main} 
+                />
+                <Text style={styles.sourceText} numberOfLines={1}>
+                  "{message.sources[0].text}"
+                </Text>
+              </TouchableOpacity>
             </View>
           )}
           
@@ -221,7 +228,7 @@ export default function ChatScreen() {
         style={styles.gradient}
       >
         <View style={styles.header}>
-          <Text style={styles.title}>AI Chat</Text>
+          <Text style={styles.title}>Ask Tai</Text>
           <TouchableOpacity 
             style={styles.clearButton}
             onPress={clearChat}
@@ -383,10 +390,8 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   sourcesContainer: {
-    marginTop: spacing.md,
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.surface.border,
+    marginTop: spacing.sm,
+    flexDirection: 'row',
   },
   sourcesTitle: {
     ...typography.caption,
@@ -397,20 +402,19 @@ const styles = StyleSheet.create({
   sourceChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: `${colors.primary.main}10`,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+    backgroundColor: `${colors.primary.main}08`,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: borderRadius.sm,
-    marginRight: spacing.xs,
-    marginTop: spacing.xs,
     borderWidth: 1,
-    borderColor: `${colors.primary.main}30`,
+    borderColor: `${colors.primary.main}20`,
   },
   sourceText: {
     ...typography.caption,
-    color: colors.primary.main,
-    marginLeft: spacing.xs,
-    fontSize: 11,
+    color: colors.text.secondary,
+    marginLeft: 4,
+    fontSize: 10,
+    fontStyle: 'italic',
   },
   resultsContainer: {
     marginTop: spacing.sm,
