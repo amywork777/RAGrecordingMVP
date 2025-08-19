@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import ZeroEntropyService from '../services/ZeroEntropyService';
+import ZeroEntropySimpleService from '../services/ZeroEntropySimpleService';
 import MockDataService from '../services/MockDataService';
+import GPTService from '../services/GPTService';
 
 const router = Router();
 
@@ -14,9 +16,12 @@ router.post('/search', async (req: Request, res: Response) => {
 
     const searchResults = await ZeroEntropyService.search(query, limit);
     
+    // Use GPT to generate answer based on search results
     let answer: string | undefined;
     if (searchResults.length > 0) {
-      answer = await ZeroEntropyService.generateAnswer(query, searchResults);
+      answer = await GPTService.generateAnswer(query, searchResults);
+    } else {
+      answer = "I couldn't find any relevant information in your recordings for that query.";
     }
 
     const formattedResults = searchResults.map(result => ({
@@ -71,6 +76,28 @@ router.delete('/documents/:id', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Delete error:', error);
     res.status(500).json({ error: 'Failed to delete document' });
+  }
+});
+
+// New endpoint to check ZeroEntropy status
+router.get('/zeroentropy/status', async (req: Request, res: Response) => {
+  try {
+    const status = ZeroEntropySimpleService.getStatus();
+    const mockTranscripts = ZeroEntropySimpleService.getMockTranscripts();
+    
+    res.json({
+      zeroentropy: status,
+      mockData: {
+        transcriptCount: mockTranscripts.length,
+        sampleTranscripts: mockTranscripts.slice(0, 3).map(t => ({
+          text: t.text.substring(0, 100) + '...',
+          timestamp: t.timestamp,
+        })),
+      },
+    });
+  } catch (error) {
+    console.error('Status check error:', error);
+    res.status(500).json({ error: 'Failed to check ZeroEntropy status' });
   }
 });
 

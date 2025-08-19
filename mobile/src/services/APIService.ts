@@ -39,6 +39,30 @@ class APIService {
   }
 
   async searchTranscripts(query: string): Promise<SearchResponse> {
+    // Try ZeroEntropy + GPT search first
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/zeroentropy/search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          query,
+          limit: 5,
+          useGPT: true 
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Using ZeroEntropy + GPT search');
+        return data;
+      }
+    } catch (error) {
+      console.log('ZeroEntropy search failed, falling back to regular search');
+    }
+
+    // Fallback to regular search
     const response = await fetch(`${API_BASE_URL}/api/search`, {
       method: 'POST',
       headers: {
@@ -55,6 +79,20 @@ class APIService {
   }
 
   async getRecentTranscripts(limit: number = 10): Promise<SearchResult[]> {
+    // Try to fetch from ZeroEntropy first
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/zeroentropy/documents?limit=${limit}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`Fetched ${data.count} documents from ZeroEntropy`);
+        return data.documents || [];
+      }
+    } catch (error) {
+      console.log('ZeroEntropy fetch failed, falling back to mock data');
+    }
+
+    // Fallback to mock data endpoint
     const response = await fetch(`${API_BASE_URL}/api/transcripts/recent?limit=${limit}`);
 
     if (!response.ok) {

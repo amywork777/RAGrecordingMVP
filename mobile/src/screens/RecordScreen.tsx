@@ -30,10 +30,33 @@ export default function RecordScreen() {
     BLEService.on('deviceDisconnected', handleDeviceDisconnected);
     BLEService.on('audioChunk', handleAudioChunk);
 
+    // Load existing transcripts from backend on mount
+    loadTranscriptsFromBackend();
+
     return () => {
       BLEService.removeAllListeners();
     };
   }, [currentRecordingId]);
+
+  const loadTranscriptsFromBackend = async () => {
+    try {
+      console.log('Loading transcripts from backend...');
+      const recentTranscripts = await APIService.getRecentTranscripts(50); // Get more transcripts
+      
+      if (recentTranscripts && recentTranscripts.length > 0) {
+        const formattedTranscripts: Transcript[] = recentTranscripts.map((t: any) => ({
+          id: t.id,
+          text: t.text,
+          timestamp: new Date(t.timestamp),
+        }));
+        
+        setTranscripts(formattedTranscripts);
+        console.log(`Loaded ${formattedTranscripts.length} transcripts from backend`);
+      }
+    } catch (error) {
+      console.error('Error loading transcripts:', error);
+    }
+  };
 
   const handleDeviceConnected = () => {
     setIsConnected(true);
@@ -150,9 +173,17 @@ export default function RecordScreen() {
       </View>
 
       <ScrollView style={styles.transcriptContainer}>
-        <Text style={styles.sectionTitle}>Live Transcription</Text>
+        <View style={styles.transcriptHeader}>
+          <Text style={styles.sectionTitle}>All Transcripts</Text>
+          <TouchableOpacity
+            style={styles.refreshButton}
+            onPress={loadTranscriptsFromBackend}
+          >
+            <Text style={styles.refreshButtonText}>Refresh</Text>
+          </TouchableOpacity>
+        </View>
         {transcripts.length === 0 ? (
-          <Text style={styles.emptyText}>No transcripts yet. Start recording to see live transcription.</Text>
+          <Text style={styles.emptyText}>No transcripts yet. Loading from storage...</Text>
         ) : (
           transcripts.map((transcript) => (
             <View key={transcript.id} style={styles.transcriptItem}>
@@ -245,11 +276,27 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
   },
+  transcriptHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 15,
     color: '#333',
+  },
+  refreshButton: {
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 15,
+  },
+  refreshButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   emptyText: {
     color: '#999',

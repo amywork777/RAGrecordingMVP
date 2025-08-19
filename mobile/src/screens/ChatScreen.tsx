@@ -39,19 +39,28 @@ export default function ChatScreen() {
 
   const loadRecentTranscripts = async () => {
     try {
+      console.log('Loading recent transcripts...');
       const recent = await APIService.getRecentTranscripts(5);
-      if (recent.length > 0) {
-        const welcomeMessage: Message = {
-          id: 'welcome',
-          text: 'Welcome! I can help you search through your recorded conversations. Try asking something like "What did I say about..." or browse your recent recordings below.',
-          isUser: false,
-          timestamp: new Date(),
-          results: recent,
-        };
-        setMessages([welcomeMessage]);
-      }
+      console.log('Received transcripts:', recent);
+      
+      const welcomeMessage: Message = {
+        id: 'welcome',
+        text: 'Welcome! I have access to your recorded conversations and can help you find information. Try asking questions like:\n\n• "What do I know about octopuses?"\n• "Which animals can regenerate?"\n• "Tell me about unique defense mechanisms"\n\nI\'ll search through your recordings and provide helpful answers!',
+        isUser: false,
+        timestamp: new Date(),
+        // Don't show raw transcripts in welcome message
+      };
+      setMessages([welcomeMessage]);
     } catch (error) {
       console.error('Error loading recent transcripts:', error);
+      // Show error message to user
+      const errorMessage: Message = {
+        id: 'error',
+        text: `Could not connect to backend. Make sure the backend is running on http://172.16.3.245:3000`,
+        isUser: false,
+        timestamp: new Date(),
+      };
+      setMessages([errorMessage]);
     }
   };
 
@@ -77,7 +86,8 @@ export default function ChatScreen() {
         text: searchResponse.answer || 'Here are the relevant recordings I found:',
         isUser: false,
         timestamp: new Date(),
-        results: searchResponse.results,
+        // Don't show raw results if we have a GPT answer
+        results: searchResponse.answer ? undefined : searchResponse.results,
       };
 
       setMessages(prev => [...prev, responseMessage]);

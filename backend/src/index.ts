@@ -5,6 +5,7 @@ import express from 'express';
 import cors from 'cors';
 import transcriptionRoutes from './routes/transcription';
 import searchRoutes from './routes/search';
+import zeroEntropyRoutes from './routes/zeroentropy';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -33,6 +34,7 @@ app.get('/health', (req, res) => {
 
 app.use('/api', transcriptionRoutes);
 app.use('/api', searchRoutes);
+app.use('/api/zeroentropy', zeroEntropyRoutes);
 
 app.use(errorHandler);
 
