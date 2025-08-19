@@ -188,6 +188,21 @@ npm install zeroentropy
 pip install zeroentropy
 ```
 
+### Uploading Text Files from the Mobile App
+- On the Record screen, tap the "Upload Text" button to select a `.txt` file from your device.
+- The app reads the file and sends its content to the backend endpoint:
+  - `POST /api/zeroentropy/upload-text`
+- The backend uploads the content as a text document to the `ai-wearable-transcripts` collection in ZeroEntropy.
+
+Requirements:
+- Backend must be running and reachable from the device (see LAN setup above).
+- `ZEROENTROPY_API_KEY` must be set in `backend/.env`.
+- Mobile dependencies installed: `expo-document-picker`, `expo-file-system`.
+
+Troubleshooting:
+- If the upload fails with 500, check `http://<YOUR_MAC_LAN_IP>:3000/api/zeroentropy/status` for `apiKeyConfigured: true`.
+- Ensure the selected file is plain text (`text/plain`).
+
 ## API Endpoints
 
 ### POST /api/transcribe

@@ -28,6 +28,7 @@ interface Transcript {
   text: string;
   timestamp: Date;
   isExpanded?: boolean;
+  path?: string; // ZeroEntropy document path when available
 }
 
 export default function RecordScreen({ route }: any) {
@@ -117,6 +118,7 @@ export default function RecordScreen({ route }: any) {
           id: t.id,
           text: t.text,
           timestamp: new Date(t.timestamp),
+          path: t.path, // present for ZeroEntropy documents
         }));
         
         setTranscripts(formattedTranscripts);
@@ -206,10 +208,10 @@ export default function RecordScreen({ route }: any) {
     ));
   };
 
-  const deleteTranscript = async (id: string) => {
+  const deleteTranscript = async (transcript: Transcript) => {
     Alert.alert(
-      'Delete Recording',
-      'Are you sure you want to delete this recording?',
+      'Delete this item?',
+      'This will remove it from the list and from ZeroEntropy.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -217,15 +219,19 @@ export default function RecordScreen({ route }: any) {
           style: 'destructive',
           onPress: async () => {
             try {
-              // Remove from local state immediately
-              setTranscripts(prev => prev.filter(t => t.id !== id));
+              // Delete from ZeroEntropy only if we have a real document path
+              if (transcript.path) {
+                await APIService.deleteDocument(transcript.path);
+                console.log(`Successfully deleted transcript with path ${transcript.path}`);
+              } else {
+                console.log('No path found, removing locally only');
+              }
               
-              // Delete from ZeroEntropy backend
-              await APIService.deleteTranscript(id);
-              console.log(`Successfully deleted transcript ${id}`);
-            } catch (error) {
-              console.error('Error deleting transcript:', error);
-              Alert.alert('Error', 'Failed to delete recording');
+              // Remove from UI
+              setTranscripts((prev) => prev.filter((t) => t.id !== transcript.id));
+            } catch (err) {
+              console.error('Delete failed:', err);
+              Alert.alert('Delete Failed', 'Could not delete the document.');
               // Reload in case of error
               loadTranscriptsFromBackend();
             }
@@ -404,7 +410,7 @@ export default function RecordScreen({ route }: any) {
                       </View>
                       <TouchableOpacity
                         style={styles.deleteButton}
-                        onPress={() => deleteTranscript(transcript.id)}
+                        onPress={() => deleteTranscript(transcript)}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
                         <Ionicons name="trash-outline" size={16} color={colors.accent.error} />

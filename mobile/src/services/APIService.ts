@@ -139,15 +139,17 @@ class APIService {
     return response.json();
   }
 
-  async deleteTranscript(id: string): Promise<any> {
-    const response = await fetch(`${API_BASE_URL}/api/zeroentropy/documents/${id}`, {
-      method: 'DELETE',
+  async deleteDocument(path: string, collectionName: string = 'ai-wearable-transcripts'): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/api/zeroentropy/delete-document`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ path, collection_name: collectionName }),
     });
-
     if (!response.ok) {
-      throw new Error(`Failed to delete transcript: ${response.statusText}`);
+      throw new Error(`Failed to delete document: ${response.statusText}`);
     }
-
     return response.json();
   }
 }

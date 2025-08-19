@@ -193,28 +193,62 @@ router.get('/status', async (req: Request, res: Response) => {
   }
 });
 
-// Delete a document from ZeroEntropy
-router.delete('/documents/:id', async (req: Request, res: Response) => {
+// Upload a plain text document to ZeroEntropy
+router.post('/upload-text', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const { text, path = 'uploads/mobile-text.txt', metadata = {}, collection_name = 'ai-wearable-transcripts' } = req.body || {};
+
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ error: 'Missing required field: text' });
+    }
+
     const client = getZeroEntropyClient();
-    
-    console.log(`Deleting document ${id} from ZeroEntropy...`);
-    
-    // Since ZeroEntropy uses paths, we need to find the document path by ID
-    // For now, we'll use the ID as the path
-    await client.documents.delete({
-      collection_name: 'ai-wearable-transcripts',
-      path: id,
+
+    const response = await client.documents.add({
+      collection_name,
+      path,
+      content: {
+        type: 'text',
+        text,
+      },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        ...metadata,
+      } as any,
+    } as any);
+
+    res.json({
+      message: 'Document uploaded to ZeroEntropy',
+      response,
+      path,
+      collection_name,
     });
-    
-    res.json({ success: true, message: 'Document deleted successfully' });
   } catch (error: any) {
-    console.error('Error deleting document:', error);
-    res.status(500).json({ 
-      error: 'Failed to delete document', 
-      details: error.message 
-    });
+    console.error('Error uploading text to ZeroEntropy:', error);
+    res.status(500).json({ error: 'Failed to upload document', message: error.message });
+  }
+});
+
+// Delete a document from ZeroEntropy by collection_name + path
+router.post('/delete-document', async (req: Request, res: Response) => {
+  try {
+    const { collection_name = 'ai-wearable-transcripts', path } = req.body || {};
+
+    if (!path || typeof path !== 'string') {
+      return res.status(400).json({ error: 'Missing required field: path' });
+    }
+
+    const client = getZeroEntropyClient();
+
+    const response = await client.documents.delete({
+      collection_name,
+      path,
+    } as any);
+
+    res.json({ message: 'Document deleted', response, path, collection_name });
+  } catch (error: any) {
+    console.error('Error deleting document from ZeroEntropy:', error);
+    res.status(500).json({ error: 'Failed to delete document', message: error.message });
   }
 });
 
