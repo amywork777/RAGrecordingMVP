@@ -250,9 +250,44 @@ export default function RecordScreen() {
         ) : (
           transcripts.map((transcript) => (
             <View key={transcript.id} style={styles.transcriptItem}>
-              <Text style={styles.transcriptTime}>
-                {transcript.timestamp.toLocaleTimeString()}
-              </Text>
+              <View style={styles.transcriptHeaderRow}>
+                <Text style={styles.transcriptTime}>
+                  {transcript.timestamp.toLocaleTimeString()}
+                </Text>
+                <TouchableOpacity
+                  style={styles.deleteBadge}
+                  onPress={() => {
+                    Alert.alert(
+                      'Delete this item?',
+                      'This will remove it from the list and from ZeroEntropy.',
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Delete',
+                          style: 'destructive',
+                          onPress: async () => {
+                            try {
+                              // Try to delete from ZeroEntropy using a predictable path if present
+                              // If your backend returns paths with each item, wire it here
+                              const possiblePath = `mobile/uploads/${transcript.id}.txt`;
+                              try {
+                                await APIService.deleteDocument(possiblePath);
+                              } catch {}
+                              // Remove from UI
+                              setTranscripts((prev) => prev.filter((t) => t.id !== transcript.id));
+                            } catch (err) {
+                              console.error('Delete failed:', err);
+                              Alert.alert('Delete Failed', 'Could not delete the document.');
+                            }
+                          },
+                        },
+                      ]
+                    );
+                  }}
+                >
+                  <Text style={styles.deleteBadgeText}>Delete</Text>
+                </TouchableOpacity>
+              </View>
               <Text style={styles.transcriptText}>{transcript.text}</Text>
             </View>
           ))
@@ -392,10 +427,26 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
+  transcriptHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   transcriptTime: {
     fontSize: 12,
     color: '#666',
     marginBottom: 5,
+  },
+  deleteBadge: {
+    backgroundColor: '#f44336',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  deleteBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   transcriptText: {
     fontSize: 16,
