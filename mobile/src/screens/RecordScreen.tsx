@@ -19,6 +19,7 @@ interface Transcript {
   id: string;
   text: string;
   timestamp: Date;
+  path?: string; // ZeroEntropy document path when available
 }
 
 export default function RecordScreen() {
@@ -51,6 +52,7 @@ export default function RecordScreen() {
           id: t.id,
           text: t.text,
           timestamp: new Date(t.timestamp),
+          path: t.path, // present for ZeroEntropy documents
         }));
         
         setTranscripts(formattedTranscripts);
@@ -267,12 +269,12 @@ export default function RecordScreen() {
                           style: 'destructive',
                           onPress: async () => {
                             try {
-                              // Try to delete from ZeroEntropy using a predictable path if present
-                              // If your backend returns paths with each item, wire it here
-                              const possiblePath = `mobile/uploads/${transcript.id}.txt`;
-                              try {
-                                await APIService.deleteDocument(possiblePath);
-                              } catch {}
+                              // Delete from ZeroEntropy only if we have a real document path
+                              if (transcript.path) {
+                                await APIService.deleteDocument(transcript.path);
+                              } else {
+                                Alert.alert('Removed locally', 'This item came from mock data and has no ZeroEntropy path.');
+                              }
                               // Remove from UI
                               setTranscripts((prev) => prev.filter((t) => t.id !== transcript.id));
                             } catch (err) {
