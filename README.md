@@ -69,7 +69,7 @@ A full-stack application for AI-powered wearable devices that records, transcrib
 - Node.js 18+ and npm
 - Expo CLI (`npm install -g expo-cli`)
 - OpenAI API key
-- ZeroEntropy API key and Project ID
+- ZeroEntropy API key
 
 ### Backend Setup
 
@@ -88,13 +88,23 @@ npm install
 PORT=3000
 OPENAI_API_KEY=your_openai_api_key_here
 ZEROENTROPY_API_KEY=your_zeroentropy_api_key_here
-ZEROENTROPY_PROJECT_ID=your_project_id_here
 ```
 
-4. Start the development server:
+4. Start the development server (run this inside the `backend` directory):
 ```bash
 npm run dev
 ```
+
+5. Verify the backend is reachable:
+```bash
+# From your Mac
+open http://localhost:3000/health
+
+# From your phone (must be on the same Wi‑Fi/LAN)
+open http://<YOUR_MAC_LAN_IP>:3000/health
+# Example: http://172.16.3.229:3000/health
+```
+You should see a small JSON payload with `status: "healthy"`.
 
 ### Mobile App Setup
 
@@ -108,21 +118,75 @@ cd mobile
 npm install
 ```
 
-3. Configure API endpoint (optional):
-Create a `.env` file if you need to change the backend URL:
-```env
-EXPO_PUBLIC_API_URL=http://your-backend-url:3000
-```
-
-4. Start Expo development server:
+3. Quick start (works on simulators and often on dev machines):
 ```bash
 npx expo start
 ```
+- If you run on an iOS/Android simulator, `localhost` will generally work out of the box.
+- If you run on a physical device and it loads fine, you can stop here.
 
-5. Run on your device:
+4. If the app shows “Network request failed” on a physical device, configure the API endpoint:
+- Find your Mac's LAN IP (Wi‑Fi):
+```bash
+# macOS Wi‑Fi
+ipconfig getifaddr en0
+# (If en0 prints nothing, try en1)
+```
+- Create `mobile/.env` with your LAN IP so the app can reach your backend:
+```env
+EXPO_PUBLIC_API_URL=http://<YOUR_MAC_LAN_IP>:3000
+# Example: EXPO_PUBLIC_API_URL=http://172.16.3.229:3000
+```
+Notes:
+- Expo automatically exposes variables that start with `EXPO_PUBLIC_` to the app.
+- "localhost" only works in a simulator. On a real device, `localhost` points to the phone itself.
+
+5. Start Expo development server (LAN mode recommended):
+```bash
+# Uses the .env value above
+npx expo start --lan
+
+# Or inject the URL one‑off and clear cache (useful if the app cached a bad URL)
+EXPO_PUBLIC_API_URL=http://<YOUR_MAC_LAN_IP>:3000 npx expo start --lan --clear
+```
+
+6. Run on your device:
 - Press `i` for iOS simulator
 - Press `a` for Android emulator
 - Scan QR code with Expo Go app for physical device
+
+7. Confirm connectivity from your phone:
+- Open `http://<YOUR_MAC_LAN_IP>:3000/health` in the phone’s browser. If that loads, the app should be able to reach the backend.
+
+### Why this sometimes works on one machine but not another
+- Simulators can use `http://localhost:3000`, so things “just work” on one dev’s machine.
+- Physical devices cannot use your computer’s `localhost`. You must use your computer’s LAN IP and ensure both the phone and computer are on the same network, and the backend is listening on that IP/port.
+
+### ZeroEntropy Setup (optional but recommended)
+1. In `backend/.env`, set:
+```env
+ZEROENTROPY_API_KEY=ze_XXXXXXXXXXXXXXXXXXXXXXXX
+OPENAI_API_KEY=sk-...                    # optional for GPT features
+```
+2. Restart the backend: `npm run dev`
+3. Verify status from your phone or Mac:
+```
+http://<YOUR_MAC_LAN_IP>:3000/api/zeroentropy/status
+```
+You should see `status: connected` and `apiKeyConfigured: true` when configured correctly.
+
+### Install the ZeroEntropy SDK
+Using the official SDKs for Python and TypeScript / JavaScript.
+
+#### TypeScript / JavaScript
+```bash
+npm install zeroentropy
+```
+
+#### Python (if applicable)
+```bash
+pip install zeroentropy
+```
 
 ## API Endpoints
 
@@ -250,18 +314,30 @@ const searchResults = await zeroEntropy.search("What about the roadmap?");
 
 ### Common Issues
 
-1. **Connection refused on mobile app**:
-   - Ensure backend is running
-   - Check IP address if testing on physical device
-   - Update `EXPO_PUBLIC_API_URL` in mobile `.env`
+1. **Network request failed (Expo on physical device)**:
+   - Ensure the backend is running: `cd backend && npm run dev`
+   - Phone and Mac must be on the same Wi‑Fi network
+   - Set `EXPO_PUBLIC_API_URL` to `http://<YOUR_MAC_LAN_IP>:3000` (in `mobile/.env` or via CLI)
+   - Start Expo in LAN mode and clear cache if needed:
+     ```bash
+     EXPO_PUBLIC_API_URL=http://<YOUR_MAC_LAN_IP>:3000 npx expo start --lan --clear
+     ```
+   - Open `http://<YOUR_MAC_LAN_IP>:3000/health` from the phone’s browser to confirm reachability
+   - If your network blocks LAN discovery, try Tunnel mode: `npx expo start --tunnel`
 
 2. **Transcription returns simulated data**:
    - Verify OpenAI API key is set correctly
    - Check API key has Whisper access
 
-3. **Search returns empty results**:
-   - Verify ZeroEntropy credentials
-   - Check if documents are being stored properly
+3. **ZeroEntropy endpoints fail or fall back to mock**:
+   - Check `backend/.env` for `ZEROENTROPY_API_KEY`
+   - Restart backend after changing env: `npm run dev`
+   - Verify: `http://<YOUR_MAC_LAN_IP>:3000/api/zeroentropy/status`
+
+4. **"npm run dev" says missing script**:
+   - You likely ran it at the repo root. Change into the correct directory first:
+     - Backend: `cd backend && npm run dev`
+     - Mobile: `cd mobile && npx expo start`
 
 ## License
 
