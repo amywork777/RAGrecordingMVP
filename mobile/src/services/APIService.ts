@@ -20,10 +20,15 @@ interface SearchResponse {
 }
 
 class APIService {
-  async sendAudioChunk(audioData: ArrayBuffer, recordingId: string): Promise<TranscriptionResponse> {
+  async sendAudioBase64(base64Audio: string, recordingId: string): Promise<TranscriptionResponse> {
     const formData = new FormData();
-    const blob = new Blob([audioData], { type: 'audio/wav' });
-    formData.append('audio', blob as any, 'chunk.wav');
+    
+    // Create a file-like object from base64
+    formData.append('audio', {
+      uri: `data:audio/m4a;base64,${base64Audio}`,
+      type: 'audio/m4a',
+      name: 'recording.m4a',
+    } as any);
     formData.append('recordingId', recordingId);
 
     const response = await fetch(`${API_BASE_URL}/api/transcribe`, {

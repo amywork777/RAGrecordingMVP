@@ -14,14 +14,16 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
 
     const { recordingId } = req.body;
     
-    const transcription = await TranscriptionService.transcribeAudio(req.file.buffer);
+    // Detect audio format from mimetype
+    const format = req.file.mimetype.includes('m4a') || req.file.originalname?.includes('.m4a') ? 'm4a' : 'wav';
+    const transcription = await TranscriptionService.transcribeAudio(req.file.buffer, format);
     
     console.log('Transcription result:', transcription.substring(0, 100) + '...');
     
     const documentId = await ZeroEntropyService.storeDocument(transcription, {
       recordingId: recordingId || 'unknown',
       timestamp: new Date().toISOString(),
-      audioSize: req.file.size,
+      audioSize: req.file.size.toString(), // Convert to string for ZeroEntropy
       mimeType: req.file.mimetype,
     });
     

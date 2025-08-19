@@ -125,12 +125,12 @@ export default function RecordScreen() {
         const audioUri = await AudioRecordingService.stopRecording();
         
         if (audioUri) {
-          // Get the audio data
-          const audioData = await AudioRecordingService.getRecordingData();
+          // Get the audio data as base64
+          const base64Audio = await AudioRecordingService.getRecordingBase64();
           
-          if (audioData) {
+          if (base64Audio) {
             // Send to backend for transcription
-            const response = await APIService.sendAudioChunk(audioData, currentRecordingId);
+            const response = await APIService.sendAudioBase64(base64Audio, currentRecordingId);
             
             if (response.transcription) {
               console.log('Transcription received:', response.transcription);

@@ -76,14 +76,13 @@ Please provide a helpful answer based on the above context.`;
         `[${doc.topic || 'Recording'} - ${doc.timestamp || 'Unknown time'}]:\n${doc.text || doc.content || ''}\n`
       ).join('\n');
 
-      const systemPrompt = `You are a friendly AI assistant with access to the user's personal recordings from their wearable device.
-These recordings include thoughts, conversations, and observations they've captured.
-You should:
-1. Answer based on the provided context from their recordings
-2. Be conversational and friendly
-3. Reference specific recordings when relevant
-4. Admit when you don't have enough information
-5. Help them recall and understand their past recordings`;
+      const systemPrompt = `You are a concise AI assistant with access to the user's recordings.
+Rules:
+- Be extremely brief and direct
+- Only answer what was asked
+- No fluff or pleasantries
+- Reference recordings only when necessary
+- If no relevant info exists, just say so`;
 
       const messages: any[] = [
         { role: 'system', content: systemPrompt }
@@ -107,8 +106,8 @@ You should:
       const completion = await this.openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages,
-        temperature: 0.8,
-        max_tokens: 600,
+        temperature: 0.3, // Lower temperature for more consistent, less creative responses
+        max_tokens: 200, // Shorter responses
       });
 
       return completion.choices[0]?.message?.content || 'I apologize, but I was unable to generate a response.';

@@ -19,10 +19,12 @@ class TranscriptionService {
         fs.mkdirSync(tempDir);
       }
       
-      const tempFilePath = path.join(tempDir, `audio_${Date.now()}.${format}`);
+      // Detect format from buffer if possible, default to m4a for mobile recordings
+      const fileExt = format === 'wav' ? 'wav' : 'm4a';
+      const tempFilePath = path.join(tempDir, `audio_${Date.now()}.${fileExt}`);
       fs.writeFileSync(tempFilePath, audioBuffer);
 
-      console.log('Transcribing audio file:', tempFilePath);
+      console.log('Transcribing audio file:', tempFilePath, 'Size:', audioBuffer.length);
 
       const transcription = await this.openai.audio.transcriptions.create({
         file: fs.createReadStream(tempFilePath),

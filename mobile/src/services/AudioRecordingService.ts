@@ -62,7 +62,7 @@ class AudioRecordingService {
     }
   }
 
-  async getRecordingData(): Promise<ArrayBuffer | null> {
+  async getRecordingBase64(): Promise<string | null> {
     try {
       if (!this.recordingUri) {
         console.log('No recording URI available');
@@ -73,18 +73,15 @@ class AudioRecordingService {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      // Convert base64 to ArrayBuffer
-      const binaryString = atob(base64);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      
-      return bytes.buffer;
+      return base64;
     } catch (error) {
       console.error('Failed to get recording data:', error);
       return null;
     }
+  }
+
+  getRecordingUri(): string | null {
+    return this.recordingUri;
   }
 
   isRecording(): boolean {
