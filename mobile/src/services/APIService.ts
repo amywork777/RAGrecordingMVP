@@ -17,6 +17,12 @@ interface SearchResult {
 interface SearchResponse {
   results: SearchResult[];
   answer?: string;
+  sources?: Array<{
+    text: string;
+    timestamp: string;
+    topic: string;
+    score: number;
+  }>;
 }
 
 class APIService {

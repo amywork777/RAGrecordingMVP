@@ -124,15 +124,19 @@ router.post('/search', async (req: Request, res: Response) => {
     
     // Generate GPT answer if requested
     let answer: string | undefined;
+    let sources: any[] = [];
     if (useGPT && topDocs.length > 0) {
       const contextDocs = topDocs.map(doc => ({
         text: doc.content,
         topic: doc.metadata?.topic || 'Unknown',
         timestamp: doc.metadata?.timestamp || '',
         score: doc.score,
+        path: doc.path,
       }));
       
-      answer = await GPTService.generateConversationalResponse(query, contextDocs);
+      const gptResponse = await GPTService.generateConversationalResponse(query, contextDocs);
+      answer = gptResponse.answer;
+      sources = gptResponse.sources;
     }
     
     // Format the results
@@ -146,6 +150,7 @@ router.post('/search', async (req: Request, res: Response) => {
     res.json({
       results: formattedResults,
       answer: answer,
+      sources: sources,
       query: query,
       source: 'zeroentropy+gpt',
       model: useGPT ? 'gpt-3.5-turbo' : null,

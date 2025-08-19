@@ -64,12 +64,15 @@ Please provide a helpful answer based on the above context.`;
     query: string, 
     context: any[], 
     conversationHistory?: { role: string; content: string }[]
-  ): Promise<string> {
+  ): Promise<{ answer: string; sources: any[] }> {
     try {
       // Check if API key is configured
       if (!process.env.OPENAI_API_KEY) {
         console.error('OpenAI API key not configured');
-        return 'OpenAI API key is not configured. Please set OPENAI_API_KEY in your .env file.';
+        return { 
+          answer: 'OpenAI API key is not configured. Please set OPENAI_API_KEY in your .env file.',
+          sources: []
+        };
       }
 
       const contextText = context.map((doc, index) => 
@@ -110,7 +113,18 @@ Rules:
         max_tokens: 200, // Shorter responses
       });
 
-      return completion.choices[0]?.message?.content || 'I apologize, but I was unable to generate a response.';
+      const answer = completion.choices[0]?.message?.content || 'I apologize, but I was unable to generate a response.';
+      
+      // Return answer with source citations
+      return {
+        answer,
+        sources: context.map(doc => ({
+          text: (doc.text || doc.content || '').substring(0, 100) + '...',
+          timestamp: doc.timestamp,
+          topic: doc.topic || 'Recording',
+          score: doc.score,
+        }))
+      };
     } catch (error: any) {
       console.error('Error in conversational response:', error);
       console.error('Error details:', {
@@ -120,15 +134,15 @@ Rules:
       });
       
       // More specific error messages
-      if (error.status === 401) {
-        return 'Authentication error with OpenAI API. Please check your API key.';
-      } else if (error.status === 429) {
-        return 'Rate limit exceeded. Please try again in a moment.';
-      } else if (error.status === 500) {
-        return 'OpenAI service error. Please try again later.';
-      }
+      const errorMessage = error.status === 401 
+        ? 'Authentication error with OpenAI API. Please check your API key.'
+        : error.status === 429
+        ? 'Rate limit exceeded. Please try again in a moment.'
+        : error.status === 500
+        ? 'OpenAI service error. Please try again later.'
+        : `Error generating response: ${error.message}`;
       
-      return `Error generating response: ${error.message}`;
+      return { answer: errorMessage, sources: [] };
     }
   }
 
