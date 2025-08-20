@@ -10,6 +10,7 @@ import {
   SafeAreaView,
   Animated,
   Dimensions,
+  TextInput,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -51,6 +52,8 @@ export default function RecordScreen({ route }: any) {
   const [intervalId, setIntervalId] = useState<NodeJS.Timeout | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filteredTranscripts, setFilteredTranscripts] = useState<Transcript[]>([]);
 
   useEffect(() => {
     BLEService.on('deviceConnected', handleDeviceConnected);
@@ -132,6 +135,8 @@ export default function RecordScreen({ route }: any) {
           return {
             id: t.id,
             text: t.text,
+            title: t.title,
+            summary: t.summary,
             timestamp: new Date(t.timestamp),
             path: t.path,
             aiTitle: t.aiTitle || fallbackTitle,
@@ -142,11 +147,29 @@ export default function RecordScreen({ route }: any) {
         });
         
         setTranscripts(formattedTranscripts);
+        setFilteredTranscripts(formattedTranscripts);
       }
     } catch (error) {
       console.error('Error loading transcripts:', error);
     }
   };
+
+  // Filter transcripts based on search query
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setFilteredTranscripts(transcripts);
+    } else {
+      const query = searchQuery.toLowerCase();
+      const filtered = transcripts.filter(transcript => {
+        const title = (transcript.aiTitle || transcript.title || '').toLowerCase();
+        const summary = (transcript.aiSummary || transcript.summary || '').toLowerCase();
+        const text = (transcript.text || '').toLowerCase();
+        
+        return title.includes(query) || summary.includes(query) || text.includes(query);
+      });
+      setFilteredTranscripts(filtered);
+    }
+  }, [searchQuery, transcripts]);
 
   const formatDuration = (seconds?: number | null) => {
     if (!seconds || seconds <= 0) return 'N/A';
@@ -524,19 +547,51 @@ export default function RecordScreen({ route }: any) {
             </TouchableOpacity>
           </View>
 
+          {/* Search Bar */}
+          <View style={styles.searchContainer}>
+            <View style={styles.searchInputWrapper}>
+              <Ionicons name="search" size={18} color={colors.text.secondary} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search transcripts..."
+                placeholderTextColor={colors.text.disabled}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <Ionicons name="close-circle" size={18} color={colors.text.secondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+            {searchQuery && filteredTranscripts.length > 0 && (
+              <Text style={styles.searchResults}>
+                Found {filteredTranscripts.length} result{filteredTranscripts.length !== 1 ? 's' : ''}
+              </Text>
+            )}
+          </View>
+
           <ScrollView 
             ref={scrollViewRef}
             style={styles.transcriptsList}
             showsVerticalScrollIndicator={false}
           >
-            {transcripts.length === 0 ? (
+            {filteredTranscripts.length === 0 ? (
               <View style={styles.emptyState}>
-                <Ionicons name="mic-off-outline" size={40} color={colors.text.secondary} />
-                <Text style={styles.emptyText}>No recordings yet</Text>
-                <Text style={styles.emptySubtext}>Tap the mic to start recording</Text>
+                <Ionicons 
+                  name={searchQuery ? "search-outline" : "mic-off-outline"} 
+                  size={40} 
+                  color={colors.text.secondary} 
+                />
+                <Text style={styles.emptyText}>
+                  {searchQuery ? 'No matching transcripts' : 'No recordings yet'}
+                </Text>
+                <Text style={styles.emptySubtext}>
+                  {searchQuery ? 'Try different search terms' : 'Tap the mic to start recording'}
+                </Text>
               </View>
             ) : (
-              transcripts.map((transcript) => (
+              filteredTranscripts.map((transcript) => (
                 <TouchableOpacity 
                   key={transcript.id} 
                   style={[
@@ -738,6 +793,30 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: `${colors.primary.main}20`,
     borderRadius: borderRadius.md,
+  },
+  searchContainer: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  searchInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.background.card,
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.text.primary,
+  },
+  searchResults: {
+    fontSize: 12,
+    color: colors.text.secondary,
+    marginTop: spacing.xs,
+    marginLeft: spacing.sm,
   },
   transcriptsList: {
     flex: 1,
