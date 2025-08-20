@@ -3,7 +3,7 @@ import multer from 'multer';
 import TranscriptionService from '../services/TranscriptionService';
 import ZeroEntropy from 'zeroentropy';
 import SupabaseService from '../services/SupabaseService';
-import ClaudeService from '../services/ClaudeService';
+// import ClaudeService from '../services/ClaudeService';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -38,30 +38,8 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
     const speakers = speakersExpected ? parseInt(speakersExpected) : 2;
     console.log(`Processing audio file: ${req.file.originalname}, format: ${format}, size: ${req.file.size} bytes, speakers: ${speakers}`);
     const result = await TranscriptionService.transcribeAudio(req.file.buffer, format, speakers);
-    
-<<<<<<< HEAD
-    console.log('Transcription result:', result.transcription.substring(0, 100) + '...');
-    console.log('Title:', result.title);
-    console.log('Summary:', result.summary);
-    
-    const documentId = await ZeroEntropyService.storeDocument(result.transcription, {
-      recordingId: recordingId || 'unknown',
-      timestamp: new Date().toISOString(),
-      audioSize: req.file.size.toString(), // Convert to string for ZeroEntropy
-      mimeType: req.file.mimetype,
-      title: result.title,
-      summary: result.summary,
-    });
-    
-    console.log('Document stored with ID:', documentId);
 
-    res.json({
-      transcription: result.transcription,
-      title: result.title,
-      summary: result.summary,
-      documentId,
-=======
-    console.log('Transcription result (first 100):', transcription.substring(0, 100) + '...');
+    console.log('Transcription result (first 100):', result.transcription.substring(0, 100) + '...');
 
     // Store in ZeroEntropy using SDK so we get the ZE path/id for Supabase
     const client = getZeroEntropyClient();
@@ -70,11 +48,11 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
     const zeResponse = await client.documents.add({
       collection_name,
       path,
-      content: { type: 'text', text: transcription },
+      content: { type: 'text', text: result.transcription },
       metadata: {
         timestamp: new Date().toISOString(),
         recordingId: recordingId || 'unknown',
-        audioSize: `${req.file.size}`,
+        audioSize: `${req.file?.size as number}`,
         mimeType: req.file.mimetype,
         source: 'mobile-transcription',
       } as any,
@@ -101,8 +79,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
             device_name: null,
           });
           if (docId) {
-            const { title, summary } = await ClaudeService.generateTitleAndSummary(transcription);
-            await SupabaseService.setLatestAnnotation(docId, title, summary, 'claude');
+            await SupabaseService.setLatestAnnotation(docId, result.title || 'Untitled', result.summary || '');
           }
         }
       } catch (e) {
@@ -111,10 +88,11 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
     })();
 
     res.json({
-      transcription,
+      transcription: result.transcription,
+      title: result.title,
+      summary: result.summary,
       path,
       collection_name,
->>>>>>> e433cbb (Fixed AI summary/title for uploads and recordings)
       recordingId,
       timestamp: new Date().toISOString(),
       hasDiarization: result.transcription.includes('Speaker '), // Check if diarization was applied
@@ -134,24 +112,7 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
     const { recordingId } = req.body;
     const chunks = req.files.map(file => file.buffer);
     
-<<<<<<< HEAD
     const result = await TranscriptionService.transcribeChunks(chunks);
-    
-    const documentId = await ZeroEntropyService.storeDocument(result.transcription, {
-      recordingId: recordingId || 'unknown',
-      timestamp: new Date().toISOString(),
-      chunksCount: chunks.length,
-      title: result.title,
-      summary: result.summary,
-    });
-
-    res.json({
-      transcription: result.transcription,
-      title: result.title,
-      summary: result.summary,
-      documentId,
-=======
-    const transcription = await TranscriptionService.transcribeChunks(chunks);
     // Store in ZE similar to single endpoint
     const client = getZeroEntropyClient();
     const collection_name = 'ai-wearable-transcripts';
@@ -159,7 +120,7 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
     const zeResponse = await client.documents.add({
       collection_name,
       path,
-      content: { type: 'text', text: transcription },
+      content: { type: 'text', text: result.transcription },
       metadata: {
         timestamp: new Date().toISOString(),
         recordingId: recordingId || 'unknown',
@@ -187,8 +148,7 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
             device_name: null,
           });
           if (docId) {
-            const { title, summary } = await ClaudeService.generateTitleAndSummary(transcription);
-            await SupabaseService.setLatestAnnotation(docId, title, summary, 'claude');
+            await SupabaseService.setLatestAnnotation(docId, result.title || 'Untitled', result.summary || '');
           }
         }
       } catch (e) {
@@ -197,10 +157,11 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
     })();
 
     res.json({
-      transcription,
+      transcription: result.transcription,
+      title: result.title,
+      summary: result.summary,
       path,
       collection_name,
->>>>>>> e433cbb (Fixed AI summary/title for uploads and recordings)
       recordingId,
       timestamp: new Date().toISOString(),
       hasDiarization: result.transcription.includes('Speaker '), // Check if diarization was applied

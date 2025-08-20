@@ -72,7 +72,7 @@ class TranscriptionService {
       // Format the response with speaker labels if available
       if (transcript.utterances && transcript.utterances.length > 0) {
         const formattedText = transcript.utterances
-          .map(utterance => `Speaker ${utterance.speaker}: ${utterance.text}`)
+          .map((utterance: any) => `Speaker ${utterance.speaker}: ${utterance.text}`)
           .join('\n');
         console.log('AssemblyAI transcription with diarization completed');
         return formattedText;

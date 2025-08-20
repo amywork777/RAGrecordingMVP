@@ -409,7 +409,8 @@ router.post('/upload-file', upload.single('file'), async (req: Request, res: Res
       text = req.file.buffer.toString('utf-8');
     } else if (isAudio) {
       const format = lower.endsWith('.wav') ? 'wav' : 'm4a';
-      text = await TranscriptionService.transcribeAudio(req.file.buffer, format);
+      const result = await TranscriptionService.transcribeAudio(req.file.buffer, format);
+      text = result.transcription;
     } else {
       return res.status(400).json({ error: 'Unsupported file type. Use .txt, .wav, .m4a, or .mp4' });
     }
