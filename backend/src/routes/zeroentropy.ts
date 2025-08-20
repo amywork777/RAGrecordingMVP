@@ -70,6 +70,10 @@ router.get('/documents', async (req: Request, res: Response) => {
               base.aiTitle = ann.title;
               base.aiSummary = ann.summary;
             }
+            const supDoc = await SupabaseService.fetchDocumentByPath('ai-wearable-transcripts', doc.path);
+            if (supDoc) {
+              base.durationSeconds = supDoc.duration_seconds ?? null;
+            }
           }
         } catch {}
         return base;
@@ -405,11 +409,14 @@ router.post('/upload-file', upload.single('file'), async (req: Request, res: Res
     const path = `mobile/uploads/${Date.now()}_${originalname || 'upload'}`;
 
     let text: string;
+    let durationSeconds: number | null = null;
     if (isText) {
       text = req.file.buffer.toString('utf-8');
     } else if (isAudio) {
       const format = lower.endsWith('.wav') ? 'wav' : 'm4a';
+      const startMs = Date.now();
       const result = await TranscriptionService.transcribeAudio(req.file.buffer, format);
+      durationSeconds = Math.max(1, Math.round((Date.now() - startMs) / 1000));
       text = result.transcription;
     } else {
       return res.status(400).json({ error: 'Unsupported file type. Use .txt, .wav, .m4a, or .mp4' });
@@ -447,6 +454,7 @@ router.post('/upload-file', upload.single('file'), async (req: Request, res: Res
           source: isText ? 'mobile-text' : 'mobile-audio',
           ze_index_status: (response as any)?.document?.index_status || null,
           device_name: null,
+          duration_seconds: durationSeconds,
         });
         if (docId) {
           const { title, summary } = await ClaudeService.generateTitleAndSummary(text);

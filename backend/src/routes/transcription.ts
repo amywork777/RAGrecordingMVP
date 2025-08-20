@@ -37,7 +37,9 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
     
     const speakers = speakersExpected ? parseInt(speakersExpected) : 2;
     console.log(`Processing audio file: ${req.file.originalname}, format: ${format}, size: ${req.file.size} bytes, speakers: ${speakers}`);
+    const startMs = Date.now();
     const result = await TranscriptionService.transcribeAudio(req.file.buffer, format, speakers);
+    const durationSeconds = Math.max(1, Math.round((Date.now() - startMs) / 1000));
 
     console.log('Transcription result (first 100):', result.transcription.substring(0, 100) + '...');
 
@@ -77,6 +79,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
             source: 'mobile-transcription',
             ze_index_status: (zeResponse as any)?.document?.index_status || null,
             device_name: null,
+            duration_seconds: durationSeconds,
           });
           if (docId) {
             await SupabaseService.setLatestAnnotation(docId, result.title || 'Untitled', result.summary || '');
@@ -112,7 +115,9 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
     const { recordingId } = req.body;
     const chunks = req.files.map(file => file.buffer);
     
+    const startMs = Date.now();
     const result = await TranscriptionService.transcribeChunks(chunks);
+    const durationSeconds = Math.max(1, Math.round((Date.now() - startMs) / 1000));
     // Store in ZE similar to single endpoint
     const client = getZeroEntropyClient();
     const collection_name = 'ai-wearable-transcripts';
@@ -146,6 +151,7 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
             source: 'mobile-transcription-batch',
             ze_index_status: (zeResponse as any)?.document?.index_status || null,
             device_name: null,
+            duration_seconds: durationSeconds,
           });
           if (docId) {
             await SupabaseService.setLatestAnnotation(docId, result.title || 'Untitled', result.summary || '');

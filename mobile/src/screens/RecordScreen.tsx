@@ -33,6 +33,8 @@ interface Transcript {
   path?: string; // ZeroEntropy document path when available
   aiTitle?: string;
   aiSummary?: string;
+  durationSeconds?: number | null;
+  duration_seconds?: number | null;
 }
 
 export default function RecordScreen({ route }: any) {
@@ -133,7 +135,9 @@ export default function RecordScreen({ route }: any) {
             path: t.path,
             aiTitle: t.aiTitle || fallbackTitle,
             aiSummary: t.aiSummary || fallbackSummary,
-          } as Transcript;
+            // @ts-ignore
+            durationSeconds: t.durationSeconds ?? t.duration_seconds ?? null,
+          } as any;
         });
         
         setTranscripts(formattedTranscripts);
@@ -141,6 +145,13 @@ export default function RecordScreen({ route }: any) {
     } catch (error) {
       console.error('Error loading transcripts:', error);
     }
+  };
+
+  const formatDuration = (seconds?: number | null) => {
+    if (!seconds || seconds <= 0) return 'N/A';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const handleDeviceConnected = () => {
@@ -363,7 +374,7 @@ export default function RecordScreen({ route }: any) {
       const dt = t.timestamp;
       const dateStr = dt.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
       const timeStr = dt.toLocaleTimeString();
-      const durationStr = '0:45'; // Placeholder until we track per-item duration
+      const durationStr = formatDuration(t.durationSeconds ?? t.duration_seconds);
       let summary = '';
       try {
         summary = await APIService.generateSummary(t.text);
@@ -558,7 +569,7 @@ export default function RecordScreen({ route }: any) {
                         <Text style={styles.reportTitleInline}>📄 TaiNecklace Transcription Report</Text>
                         <Text style={styles.reportMeta}>📅 Date: {transcript.timestamp.toLocaleDateString()}</Text>
                         <Text style={styles.reportMeta}>🕐 Time: {transcript.timestamp.toLocaleTimeString()}</Text>
-                        <Text style={styles.reportMeta}>⏱️ Duration: 0:45</Text>
+                        <Text style={styles.reportMeta}>⏱️ Duration: {formatDuration(transcript.durationSeconds ?? transcript.duration_seconds)}</Text>
                         <Text style={styles.reportSection}>🤖 AI Summary:</Text>
                         <Text style={styles.reportBody}>{transcript.aiSummary || '—'}</Text>
                         <Text style={styles.reportSection}>📝 Full Transcription:</Text>

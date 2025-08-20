@@ -13,6 +13,7 @@ export interface DocumentUpsertInput {
   source?: string | null;
   ze_index_status?: string | null;
   device_name?: string | null;
+  duration_seconds?: number | null;
 }
 
 class SupabaseService {
@@ -50,6 +51,7 @@ class SupabaseService {
         source: input.source || null,
         ze_index_status: input.ze_index_status || null,
         device_name: input.device_name || null,
+        duration_seconds: input.duration_seconds ?? null,
         updated_at: new Date().toISOString(),
       }, {
         onConflict: 'ze_collection_name,ze_path'
@@ -113,6 +115,19 @@ class SupabaseService {
       .single();
     if (annErr || !ann) return null;
     return { title: ann.title, summary: ann.summary };
+  }
+
+  async fetchDocumentByPath(ze_collection_name: string, ze_path: string): Promise<{ id: string; duration_seconds: number | null } | null> {
+    const supabase = this.getClient();
+    if (!supabase) return null;
+    const { data, error } = await supabase
+      .from('documents')
+      .select('id, duration_seconds')
+      .eq('ze_collection_name', ze_collection_name)
+      .eq('ze_path', ze_path)
+      .single();
+    if (error || !data) return null;
+    return data as any;
   }
 }
 
