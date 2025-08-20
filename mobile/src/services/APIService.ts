@@ -36,8 +36,12 @@ console.log('API base URL:', API_BASE_URL);
 
 interface TranscriptionResponse {
   transcription: string;
+  title?: string;
+  summary?: string;
   recordingId: string;
   timestamp: string;
+  // AssemblyAI may return transcription with speaker labels
+  hasDiarization?: boolean;
 }
 
 interface SearchResult {

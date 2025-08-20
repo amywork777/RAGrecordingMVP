@@ -12,7 +12,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       return res.status(400).json({ error: 'No audio file provided' });
     }
 
-    const { recordingId } = req.body;
+    const { recordingId, speakersExpected } = req.body;
     
     // Detect audio format from mimetype or filename
     let format = 'wav'; // default
@@ -24,25 +24,33 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       format = 'mp3';
     }
     
-    console.log(`Processing audio file: ${req.file.originalname}, format: ${format}, size: ${req.file.size} bytes`);
-    const transcription = await TranscriptionService.transcribeAudio(req.file.buffer, format);
+    const speakers = speakersExpected ? parseInt(speakersExpected) : 2;
+    console.log(`Processing audio file: ${req.file.originalname}, format: ${format}, size: ${req.file.size} bytes, speakers: ${speakers}`);
+    const result = await TranscriptionService.transcribeAudio(req.file.buffer, format, speakers);
     
-    console.log('Transcription result:', transcription.substring(0, 100) + '...');
+    console.log('Transcription result:', result.transcription.substring(0, 100) + '...');
+    console.log('Title:', result.title);
+    console.log('Summary:', result.summary);
     
-    const documentId = await ZeroEntropyService.storeDocument(transcription, {
+    const documentId = await ZeroEntropyService.storeDocument(result.transcription, {
       recordingId: recordingId || 'unknown',
       timestamp: new Date().toISOString(),
       audioSize: req.file.size.toString(), // Convert to string for ZeroEntropy
       mimeType: req.file.mimetype,
+      title: result.title,
+      summary: result.summary,
     });
     
     console.log('Document stored with ID:', documentId);
 
     res.json({
-      transcription,
+      transcription: result.transcription,
+      title: result.title,
+      summary: result.summary,
       documentId,
       recordingId,
       timestamp: new Date().toISOString(),
+      hasDiarization: result.transcription.includes('Speaker '), // Check if diarization was applied
     });
   } catch (error) {
     console.error('Transcription error:', error);
@@ -59,19 +67,24 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
     const { recordingId } = req.body;
     const chunks = req.files.map(file => file.buffer);
     
-    const transcription = await TranscriptionService.transcribeChunks(chunks);
+    const result = await TranscriptionService.transcribeChunks(chunks);
     
-    const documentId = await ZeroEntropyService.storeDocument(transcription, {
+    const documentId = await ZeroEntropyService.storeDocument(result.transcription, {
       recordingId: recordingId || 'unknown',
       timestamp: new Date().toISOString(),
       chunksCount: chunks.length,
+      title: result.title,
+      summary: result.summary,
     });
 
     res.json({
-      transcription,
+      transcription: result.transcription,
+      title: result.title,
+      summary: result.summary,
       documentId,
       recordingId,
       timestamp: new Date().toISOString(),
+      hasDiarization: result.transcription.includes('Speaker '), // Check if diarization was applied
     });
   } catch (error) {
     console.error('Batch transcription error:', error);
