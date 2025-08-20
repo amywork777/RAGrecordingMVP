@@ -3,6 +3,7 @@ import ZeroEntropyService from '../services/ZeroEntropyService';
 import ZeroEntropySimpleService from '../services/ZeroEntropySimpleService';
 import MockDataService from '../services/MockDataService';
 import GPTService from '../services/GPTService';
+import ClaudeService from '../services/ClaudeService';
 
 const router = Router();
 
@@ -98,6 +99,36 @@ router.get('/zeroentropy/status', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Status check error:', error);
     res.status(500).json({ error: 'Failed to check ZeroEntropy status' });
+  }
+});
+
+// Generate AI summary for a transcript text using Claude (fallback if key missing)
+router.post('/summary', async (req: Request, res: Response) => {
+  try {
+    const { text } = req.body || {};
+    if (typeof text !== 'string') {
+      return res.status(400).json({ error: 'text is required' });
+    }
+    const summary = await ClaudeService.generateSummary(text);
+    res.json({ summary });
+  } catch (error) {
+    console.error('Summary error:', error);
+    res.status(500).json({ error: 'Failed to generate summary' });
+  }
+});
+
+// Generate AI title and summary
+router.post('/title-summary', async (req: Request, res: Response) => {
+  try {
+    const { text } = req.body || {};
+    if (typeof text !== 'string') {
+      return res.status(400).json({ error: 'text is required' });
+    }
+    const result = await ClaudeService.generateTitleAndSummary(text);
+    res.json(result);
+  } catch (error) {
+    console.error('Title/Summary error:', error);
+    res.status(500).json({ error: 'Failed to generate title/summary' });
   }
 });
 

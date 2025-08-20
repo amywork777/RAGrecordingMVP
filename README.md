@@ -88,6 +88,11 @@ npm install
 PORT=3000
 OPENAI_API_KEY=your_openai_api_key_here
 ZEROENTROPY_API_KEY=your_zeroentropy_api_key_here
+# Optional: enable Supabase metadata + AI annotations
+SUPABASE_URL=https://<your-project>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+# or for dev only:
+# SUPABASE_ANON_KEY=your_anon_key
 ```
 
 4. Start the development server (run this inside the `backend` directory):
@@ -190,14 +195,15 @@ pip install zeroentropy
 ```
 
 ### Uploading Text Files from the Mobile App
-- On the Record screen, tap the "Upload Text" button to select a `.txt` file from your device.
-- The app reads the file and sends its content to the backend endpoint:
-  - `POST /api/zeroentropy/upload-text`
-- The backend uploads the content as a text document to the `ai-wearable-transcripts` collection in ZeroEntropy.
+- On the Record screen, use the Upload buttons to send either:
+  - Text file → `POST /api/zeroentropy/upload-text`
+  - Audio file (wav/m4a/mp4) → `POST /api/zeroentropy/upload-file` (transcribed via Whisper)
+- The backend stores content in ZeroEntropy and, if Supabase is configured, upserts document metadata and saves AI title/summary.
 
 Requirements:
 - Backend must be running and reachable from the device (see LAN setup above).
 - `ZEROENTROPY_API_KEY` must be set in `backend/.env`.
+- To persist AI title/summary and avoid regeneration on load, set `SUPABASE_URL` and a key (`SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_ANON_KEY`).
 - Mobile dependencies installed: `expo-document-picker`, `expo-file-system`.
 
 Troubleshooting:
@@ -205,6 +211,19 @@ Troubleshooting:
 - Ensure the selected file is plain text (`text/plain`).
 
 ## API Endpoints
+### GET /api/zeroentropy/documents
+Returns recent documents from ZeroEntropy. When Supabase is configured, each document includes `aiTitle` and `aiSummary` fields sourced from the database (no regeneration on app load).
+
+### POST /api/zeroentropy/upload-text
+Upload raw text and store as a document in ZeroEntropy. If Supabase is configured, also upserts `documents` and writes the latest AI `title/summary`.
+
+### POST /api/zeroentropy/upload-file
+Upload a file (.txt stored directly; .wav/.m4a/.mp4 transcribed first) and then stored in ZeroEntropy. Also upserts Supabase `documents` + AI `title/summary` when configured.
+
+### POST /api/zeroentropy/sync-to-supabase
+Backfill existing ZeroEntropy documents to Supabase in one call.
+Body: `{ "limit": 500, "includeAnnotations": true }`
+
 
 ### POST /api/transcribe
 Transcribe audio chunks and store in vector database.

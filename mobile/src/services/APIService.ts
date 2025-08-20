@@ -189,6 +189,31 @@ class APIService {
     }
     return response.json();
   }
+
+  async generateSummary(text: string): Promise<string> {
+    const response = await fetch(`${API_BASE_URL}/api/summary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to generate summary: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data?.summary || '';
+  }
+
+  async generateTitleAndSummary(text: string): Promise<{ title: string; summary: string }> {
+    const response = await fetch(`${API_BASE_URL}/api/title-summary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to generate title/summary: ${response.statusText}`);
+    }
+    return response.json();
+  }
 }
 
 export default new APIService();

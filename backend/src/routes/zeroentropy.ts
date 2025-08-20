@@ -1,8 +1,13 @@
 import { Router, Request, Response } from 'express';
 import ZeroEntropy from 'zeroentropy';
 import GPTService from '../services/GPTService';
+import multer from 'multer';
+import TranscriptionService from '../services/TranscriptionService';
+import ClaudeService from '../services/ClaudeService';
+import SupabaseService from '../services/SupabaseService';
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Initialize ZeroEntropy client
 const getZeroEntropyClient = () => {
@@ -44,16 +49,30 @@ router.get('/documents', async (req: Request, res: Response) => {
     );
     
     // Format the documents for the frontend
-    const formattedDocs = docsWithContent.map((doc: any) => ({
-      id: doc.id,
-      text: doc.content || '',
-      timestamp: doc.metadata?.timestamp || new Date().toISOString(),
-      recordingId: doc.metadata?.recordingId || 'unknown',
-      topic: doc.metadata?.topic || '',
-      score: 1.0,
-      path: doc.path,
-      indexStatus: doc.index_status,
-    }));
+    const formattedDocs = await Promise.all(
+      docsWithContent.map(async (doc: any) => {
+        const base: any = {
+          id: doc.id,
+          text: doc.content || '',
+          timestamp: doc.metadata?.timestamp || new Date().toISOString(),
+          recordingId: doc.metadata?.recordingId || 'unknown',
+          topic: doc.metadata?.topic || '',
+          score: 1.0,
+          path: doc.path,
+          indexStatus: doc.index_status,
+        };
+        try {
+          if (SupabaseService.isConfigured()) {
+            const ann = await SupabaseService.fetchLatestAnnotationByPath('ai-wearable-transcripts', doc.path);
+            if (ann) {
+              base.aiTitle = ann.title;
+              base.aiSummary = ann.summary;
+            }
+          }
+        } catch {}
+        return base;
+      })
+    );
     
     // Sort by timestamp (newest first)
     formattedDocs.sort((a: any, b: any) => 
@@ -232,6 +251,33 @@ router.post('/upload-text', async (req: Request, res: Response) => {
       collection_name,
       textLength: text.length,
     });
+
+    // Fire-and-forget: upsert Supabase + AI annotation
+    ;(async () => {
+      try {
+        if (!SupabaseService.isConfigured()) return;
+        const docId = await SupabaseService.upsertDocument({
+          ze_collection_name: collection_name,
+          ze_path: path,
+          ze_document_id: (response as any)?.document?.id || null,
+          recording_id: (req.body?.metadata?.recordingId as string) || null,
+          timestamp: new Date().toISOString(),
+          topic: (req.body?.metadata?.topic as string) || null,
+          mime_type: 'text/plain',
+          original_name: null,
+          size_bytes: (text?.length as number) || null,
+          source: 'mobile-text',
+          ze_index_status: (response as any)?.document?.index_status || null,
+          device_name: null,
+        });
+        if (docId) {
+          const { title, summary } = await ClaudeService.generateTitleAndSummary(text);
+          await SupabaseService.setLatestAnnotation(docId, title, summary, 'claude');
+        }
+      } catch (e) {
+        console.warn('Supabase upsert (upload-text) failed:', e);
+      }
+    })();
   } catch (error: any) {
     console.error('Error uploading text to ZeroEntropy:', error);
     res.status(500).json({ error: 'Failed to upload document', message: error.message });
@@ -258,6 +304,156 @@ router.post('/delete-document', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error deleting document from ZeroEntropy:', error);
     res.status(500).json({ error: 'Failed to delete document', message: error.message });
+  }
+});
+
+// Sync ZeroEntropy documents into Supabase (metadata + optional AI annotations)
+// POST /api/zeroentropy/sync-to-supabase
+// body: { limit?: number, includeAnnotations?: boolean }
+router.post('/sync-to-supabase', async (req: Request, res: Response) => {
+  try {
+    if (!SupabaseService.isConfigured()) {
+      return res.status(400).json({ error: 'Supabase not configured on server' });
+    }
+
+    const limit = parseInt(req.body?.limit) || 200;
+    const includeAnnotations = req.body?.includeAnnotations !== false; // default true
+    const client = getZeroEntropyClient();
+    const collection_name = 'ai-wearable-transcripts';
+
+    // Fetch list of docs, then fetch content for each
+    const list = await client.documents.getInfoList({
+      collection_name,
+      limit,
+    });
+
+    const docsWithContent = await Promise.all(
+      ((list as any).documents || []).map(async (doc: any) => {
+        try {
+          const docInfo = await client.documents.getInfo({
+            collection_name,
+            path: doc.path,
+            include_content: true,
+          });
+          return (docInfo as any).document;
+        } catch (e) {
+          return doc; // fallback without content
+        }
+      })
+    );
+
+    let upserted = 0;
+    let annotated = 0;
+    for (const d of docsWithContent) {
+      const meta = d?.metadata || {};
+      const docId = await SupabaseService.upsertDocument({
+        ze_collection_name: collection_name,
+        ze_path: d.path,
+        ze_document_id: d.id || null,
+        recording_id: meta?.recordingId || null,
+        timestamp: meta?.timestamp || null,
+        topic: meta?.topic || null,
+        mime_type: 'text/plain',
+        original_name: meta?.original_name || null,
+        size_bytes: null,
+        source: meta?.source || 'zeroentropy-import',
+        ze_index_status: d.index_status || null,
+        device_name: meta?.device_name || null,
+      });
+      if (docId) {
+        upserted += 1;
+        if (includeAnnotations) {
+          const text: string = d?.content || '';
+          const { title, summary } = await ClaudeService.generateTitleAndSummary(text);
+          await SupabaseService.setLatestAnnotation(docId, title, summary, 'claude');
+          annotated += 1;
+        }
+      }
+    }
+
+    res.json({
+      message: 'Sync completed',
+      collection: collection_name,
+      requested: ((list as any).documents || []).length,
+      upserted,
+      annotated,
+    });
+  } catch (error: any) {
+    console.error('Error syncing to Supabase:', error);
+    res.status(500).json({ error: 'Failed to sync to Supabase', message: error.message });
+  }
+});
+
+// Upload a file (.txt direct; .wav/.m4a/.mp4 transcribe then upload)
+router.post('/upload-file', upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file provided' });
+    }
+
+    const client = getZeroEntropyClient();
+    const { originalname = '', mimetype } = req.file;
+    const lower = originalname.toLowerCase();
+    const isText = lower.endsWith('.txt') || mimetype === 'text/plain';
+    const isAudio = lower.endsWith('.wav') || lower.endsWith('.m4a') || lower.endsWith('.mp4') || mimetype.startsWith('audio/');
+
+    const collection_name = 'ai-wearable-transcripts';
+    const path = `mobile/uploads/${Date.now()}_${originalname || 'upload'}`;
+
+    let text: string;
+    if (isText) {
+      text = req.file.buffer.toString('utf-8');
+    } else if (isAudio) {
+      const format = lower.endsWith('.wav') ? 'wav' : 'm4a';
+      text = await TranscriptionService.transcribeAudio(req.file.buffer, format);
+    } else {
+      return res.status(400).json({ error: 'Unsupported file type. Use .txt, .wav, .m4a, or .mp4' });
+    }
+
+    const response = await client.documents.add({
+      collection_name,
+      path,
+      content: { type: 'text', text },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        original_name: originalname,
+        mime_type: mimetype,
+        size: `${req.file.size}`,
+        source: isText ? 'mobile-text' : 'mobile-audio',
+      } as any,
+    } as any);
+
+    res.json({ message: 'Uploaded', path, collection_name, response });
+
+    // Fire-and-forget: upsert Supabase + AI annotation
+    ;(async () => {
+      try {
+        if (!SupabaseService.isConfigured()) return;
+        const docId = await SupabaseService.upsertDocument({
+          ze_collection_name: collection_name,
+          ze_path: path,
+          ze_document_id: (response as any)?.document?.id || null,
+          recording_id: null,
+          timestamp: new Date().toISOString(),
+          topic: null,
+          mime_type: 'text/plain',
+          original_name: originalname,
+          size_bytes: (req.file?.size as number) || null,
+          source: isText ? 'mobile-text' : 'mobile-audio',
+          ze_index_status: (response as any)?.document?.index_status || null,
+          device_name: null,
+        });
+        if (docId) {
+          const { title, summary } = await ClaudeService.generateTitleAndSummary(text);
+          await SupabaseService.setLatestAnnotation(docId, title, summary, 'claude');
+        }
+      } catch (e) {
+        console.warn('Supabase upsert (upload-file) failed:', e);
+      }
+    })();
+  } catch (error: any) {
+    console.error('Error uploading file:', error);
+    res.status(500).json({ error: 'Failed to upload file', message: error.message });
   }
 });
 
