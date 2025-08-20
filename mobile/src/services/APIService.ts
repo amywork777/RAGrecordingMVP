@@ -1,4 +1,38 @@
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+
+function deriveDefaultBaseUrl(): string {
+  // 1) Respect explicit config if provided
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
+
+  // 2) Try to infer host from Expo (works in Expo Go and dev builds)
+  try {
+    const anyConstants: any = Constants as any;
+    const hostUri: string | undefined =
+      anyConstants?.expoConfig?.hostUri ||
+      anyConstants?.manifest2?.extra?.expoGo?.hostUri ||
+      anyConstants?.manifest?.debuggerHost;
+    if (hostUri && typeof hostUri === 'string') {
+      const host = hostUri.split(':')[0];
+      return `http://${host}:3000`;
+    }
+  } catch {}
+
+  // 3) Platform-specific dev fallbacks
+  if (Platform.OS === 'android') {
+    // Android emulator special alias for host-loopback
+    return 'http://10.0.2.2:3000';
+  }
+  // iOS simulator / generic fallback
+  return 'http://localhost:3000';
+}
+
+const API_BASE_URL = deriveDefaultBaseUrl();
+// Helpful log to verify at runtime
+// eslint-disable-next-line no-console
+console.log('API base URL:', API_BASE_URL);
 
 interface TranscriptionResponse {
   transcription: string;
