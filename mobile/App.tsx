@@ -7,6 +7,7 @@ import { View, Platform } from 'react-native';
 
 import RecordScreen from './src/screens/RecordScreen';
 import ChatScreen from './src/screens/ChatScreen';
+import SearchScreen from './src/screens/SearchScreen';
 import { colors } from './src/theme/colors';
 
 const Tab = createBottomTabNavigator();
@@ -21,6 +22,8 @@ export default function App() {
 
             if (route.name === 'Record') {
               iconName = focused ? 'mic-circle' : 'mic-circle-outline';
+            } else if (route.name === 'Search') {
+              iconName = focused ? 'search' : 'search-outline';
             } else if (route.name === 'Chat') {
               iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
             } else {
@@ -64,6 +67,13 @@ export default function App() {
           component={RecordScreen}
           options={{
             tabBarLabel: 'Record',
+          }}
+        />
+        <Tab.Screen 
+          name="Search" 
+          component={SearchScreen}
+          options={{
+            tabBarLabel: 'Search',
           }}
         />
         <Tab.Screen 

@@ -99,7 +99,116 @@ router.get('/documents', async (req: Request, res: Response) => {
   }
 });
 
-// Search documents in ZeroEntropy with GPT-powered answers
+// Keyword search - simple text matching
+router.post('/search/keyword', async (req: Request, res: Response) => {
+  try {
+    const { query, limit = 20 } = req.body;
+    
+    if (!query || query.trim().length === 0) {
+      return res.status(400).json({ error: 'Query is required' });
+    }
+    
+    const client = getZeroEntropyClient();
+    const searchQuery = query.toLowerCase().trim();
+    
+    console.log(`Performing keyword search for: "${searchQuery}"`);
+    
+    // Get all documents
+    const documents = await client.documents.getInfoList({
+      collection_name: 'ai-wearable-transcripts',
+      limit: 100, // Get more docs to search through
+    });
+    
+    // Fetch content for each document
+    const docsWithContent = await Promise.all(
+      ((documents as any).documents || []).map(async (doc: any) => {
+        try {
+          const docInfo = await client.documents.getInfo({
+            collection_name: 'ai-wearable-transcripts',
+            path: doc.path,
+            include_content: true,
+          });
+          return (docInfo as any).document;
+        } catch (error) {
+          console.error(`Error fetching content for ${doc.path}:`, error);
+          return null;
+        }
+      })
+    );
+    
+    // Filter and score documents based on keyword matches
+    const results = docsWithContent
+      .filter(doc => doc && doc.content)
+      .map(doc => {
+        const content = doc.content.toLowerCase();
+        const title = doc.metadata?.title?.toLowerCase() || '';
+        const summary = doc.metadata?.summary?.toLowerCase() || '';
+        
+        // Count occurrences in different fields
+        const contentMatches = (content.match(new RegExp(searchQuery, 'gi')) || []).length;
+        const titleMatches = (title.match(new RegExp(searchQuery, 'gi')) || []).length * 3; // Weight title matches higher
+        const summaryMatches = (summary.match(new RegExp(searchQuery, 'gi')) || []).length * 2; // Weight summary matches medium
+        
+        const totalScore = contentMatches + titleMatches + summaryMatches;
+        
+        // Extract snippet around first match
+        let snippet = '';
+        const matchIndex = content.indexOf(searchQuery);
+        if (matchIndex !== -1) {
+          const start = Math.max(0, matchIndex - 100);
+          const end = Math.min(content.length, matchIndex + searchQuery.length + 100);
+          snippet = '...' + doc.content.substring(start, end) + '...';
+        }
+        
+        return {
+          id: doc.id,
+          text: doc.content,
+          title: doc.metadata?.title || 'Untitled',
+          summary: doc.metadata?.summary || '',
+          timestamp: doc.metadata?.timestamp || new Date().toISOString(),
+          path: doc.path,
+          score: totalScore,
+          matches: contentMatches,
+          snippet,
+          metadata: doc.metadata,
+        };
+      })
+      .filter(doc => doc.score > 0) // Only include documents with matches
+      .sort((a, b) => b.score - a.score) // Sort by relevance
+      .slice(0, limit);
+    
+    // Add Supabase annotations if configured
+    const enrichedResults = await Promise.all(
+      results.map(async (result: any) => {
+        try {
+          if (SupabaseService.isConfigured()) {
+            const ann = await SupabaseService.fetchLatestAnnotationByPath('ai-wearable-transcripts', result.path);
+            if (ann) {
+              result.aiTitle = ann.title;
+              result.aiSummary = ann.summary;
+            }
+          }
+        } catch {}
+        return result;
+      })
+    );
+    
+    res.json({
+      results: enrichedResults,
+      query: query,
+      totalMatches: enrichedResults.length,
+      searchType: 'keyword',
+    });
+  } catch (error: any) {
+    console.error('Error performing keyword search:', error);
+    res.status(500).json({ 
+      error: 'Failed to perform keyword search',
+      message: error.message 
+    });
+  }
+});
+
+// Search documents in ZeroEntropy with GPT-powered answers (semantic search)
 router.post('/search', async (req: Request, res: Response) => {
   try {
     const { query, limit = 10, useGPT = true } = req.body;
