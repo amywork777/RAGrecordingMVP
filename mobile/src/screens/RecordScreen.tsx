@@ -13,6 +13,7 @@ import {
   TextInput,
   AppState,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -42,6 +43,7 @@ interface Transcript {
 }
 
 export default function RecordScreen({ route }: any) {
+  const navigation = useNavigation();
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
@@ -714,7 +716,18 @@ export default function RecordScreen({ route }: any) {
                     styles.transcriptCard,
                     highlightedId === transcript.id && styles.highlightedCard
                   ]}
-                  onPress={() => toggleExpand(transcript.id)}
+                  onPress={() => {
+                    const transcriptionData = {
+                      id: transcript.id,
+                      text: transcript.text,
+                      timestamp: transcript.timestamp.toISOString(),
+                      recordingId: transcript.recordingId,
+                      aiTitle: transcript.aiTitle || `Transcription ${transcript.recordingId}`,
+                      aiSummary: transcript.aiSummary || '',
+                      topic: transcript.topic || '',
+                    };
+                    navigation.navigate('TranscriptionDetail', { transcription: transcriptionData });
+                  }}
                   activeOpacity={0.7}
                 >
                   <LinearGradient
@@ -727,11 +740,6 @@ export default function RecordScreen({ route }: any) {
                   >
                     <View style={styles.cardHeader}>
                       <View style={styles.cardHeaderLeft}>
-                        <Ionicons 
-                          name={transcript.isExpanded ? "chevron-down" : "chevron-forward"} 
-                          size={16} 
-                          color={colors.primary.main} 
-                        />
                         <View style={styles.titleContainer}>
                           <Text style={styles.transcriptTitle}>
                             {transcript.aiTitle || transcript.title || 'Untitled Recording'}
@@ -744,14 +752,53 @@ export default function RecordScreen({ route }: any) {
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                         <TouchableOpacity
                           style={styles.iconButton}
-                          onPress={() => copyReport(transcript)}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            toggleExpand(transcript.id);
+                          }}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
+                          <Ionicons 
+                            name={transcript.isExpanded ? "eye-off-outline" : "eye-outline"} 
+                            size={16} 
+                            color={colors.text.secondary} 
+                          />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.iconButton}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            const transcriptionData = {
+                              id: transcript.id,
+                              text: transcript.text,
+                              timestamp: transcript.timestamp.toISOString(),
+                              recordingId: transcript.recordingId,
+                              aiTitle: transcript.aiTitle || `Transcription ${transcript.recordingId}`,
+                              aiSummary: transcript.aiSummary || '',
+                              topic: transcript.topic || '',
+                            };
+                            navigation.navigate('TranscriptionDetail', { transcription: transcriptionData });
+                          }}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
+                          <Ionicons name="chatbubbles-outline" size={16} color={colors.secondary.main} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.iconButton}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            copyReport(transcript);
+                          }}
                           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         >
                           <Ionicons name="copy-outline" size={16} color={colors.primary.main} />
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={styles.deleteButton}
-                          onPress={() => deleteTranscript(transcript)}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            deleteTranscript(transcript);
+                          }}
                           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         >
                           <Ionicons name="trash-outline" size={16} color={colors.accent.error} />

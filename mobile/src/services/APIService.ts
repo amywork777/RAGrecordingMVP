@@ -234,6 +234,20 @@ class APIService {
     }
     return response.json();
   }
+
+  async chatWithTranscription(transcriptionId: string, message: string): Promise<{ answer: string; transcriptionId: string; metadata: any }> {
+    const response = await fetch(`${API_BASE_URL}/api/chat/transcription`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transcriptionId, message }),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Chat failed: ${response.statusText}`);
+    }
+    
+    return response.json();
+  }
 }
 
 export default new APIService();

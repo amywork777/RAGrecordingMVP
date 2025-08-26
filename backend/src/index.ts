@@ -6,6 +6,7 @@ import cors from 'cors';
 import transcriptionRoutes from './routes/transcription';
 import searchRoutes from './routes/search';
 import zeroEntropyRoutes from './routes/zeroentropy';
+import chatRoutes from './routes/chat';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -35,6 +36,7 @@ app.get('/health', (req, res) => {
 app.use('/api', transcriptionRoutes);
 app.use('/api', searchRoutes);
 app.use('/api/zeroentropy', zeroEntropyRoutes);
+app.use('/api/chat', chatRoutes);
 // Alias for summary endpoint under /api
 // Note: The summary route is defined in searchRoutes as POST /summary
 
@@ -46,6 +48,7 @@ app.listen(PORT, () => {
   console.log('\nAvailable endpoints:');
   console.log('POST /api/transcribe - Transcribe audio chunks');
   console.log('POST /api/search - Search through transcripts');
+  console.log('POST /api/chat/transcription - Chat with a specific transcription');
   console.log('GET /api/transcripts/recent - Get recent transcripts');
   console.log('\nMake sure to set your environment variables in .env:');
   console.log('- OPENAI_API_KEY');

@@ -197,14 +197,39 @@ export default function ChatScreen({ navigation }: any) {
           {message.results && message.results.length > 0 && (
             <View style={styles.resultsContainer}>
               {message.results.map((result) => (
-                <View key={result.id} style={styles.resultItem}>
+                <TouchableOpacity 
+                  key={result.id} 
+                  style={styles.resultItem}
+                  onPress={() => {
+                    console.log('=== RESULT CLICKED ===');
+                    console.log('Result ID:', result.id);
+                    console.log('Result text preview:', result.text.substring(0, 100));
+                    
+                    const transcriptionData = {
+                      id: result.id,
+                      text: result.text,
+                      timestamp: result.timestamp,
+                      recordingId: result.recordingId,
+                      // Use actual data from the result if available
+                      aiTitle: (result as any).aiTitle || (result as any).title || `Transcription ${result.recordingId}`,
+                      aiSummary: (result as any).aiSummary || (result as any).summary || '',
+                      topic: (result as any).topic || '',
+                    };
+                    
+                    console.log('Navigating to TranscriptionDetail with data:', transcriptionData);
+                    navigation.navigate('TranscriptionDetail', { transcription: transcriptionData });
+                  }}
+                >
                   <Text style={styles.resultText} numberOfLines={3}>
                     {result.text}
                   </Text>
-                  <Text style={styles.resultScore}>
-                    Score: {Math.round(result.score * 100)}%
-                  </Text>
-                </View>
+                  <View style={styles.resultFooter}>
+                    <Text style={styles.resultScore}>
+                      Score: {Math.round(result.score * 100)}%
+                    </Text>
+                    <Ionicons name="chevron-forward" size={16} color={colors.text.secondary} />
+                  </View>
+                </TouchableOpacity>
               ))}
             </View>
           )}
@@ -424,15 +449,22 @@ const styles = StyleSheet.create({
     padding: spacing.sm,
     borderRadius: borderRadius.md,
     marginTop: spacing.xs,
+    borderWidth: 1,
+    borderColor: `${colors.primary.main}20`,
   },
   resultText: {
     ...typography.caption,
     color: colors.text.secondary,
   },
+  resultFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing.xs,
+  },
   resultScore: {
     ...typography.caption,
     color: colors.primary.main,
-    marginTop: spacing.xs,
     fontWeight: '600',
   },
   loadingContainer: {

@@ -172,6 +172,58 @@ class ZeroEntropyService {
     return simulatedResults.slice(0, limit);
   }
 
+  async getDocumentById(documentId: string): Promise<SearchResult | null> {
+    // Try to fetch from ZeroEntropy documents endpoint that the mobile app uses
+    try {
+      const response = await fetch(`http://localhost:3000/api/zeroentropy/documents?limit=100`);
+      
+      if (response.ok) {
+        const data: any = await response.json();
+        const documents = data.documents || [];
+        const document = documents.find((doc: any) => doc.id === documentId);
+        
+        if (document) {
+          return {
+            id: document.id,
+            text: document.text,
+            score: 1,
+            metadata: {
+              timestamp: document.timestamp,
+              recordingId: document.recordingId || 'unknown',
+              title: document.title || document.aiTitle || 'Untitled',
+              topic: document.topic || 'General',
+            },
+          };
+        }
+      }
+    } catch (error) {
+      console.log(`ZeroEntropy documents endpoint error: ${error}`);
+    }
+
+    // Fallback to mock data
+    const mockTranscripts = MockDataService.getAllTranscripts();
+    const transcript = mockTranscripts.find((t: any) => 
+      t.id === documentId || t.recordingId === documentId
+    );
+    
+    if (transcript) {
+      return {
+        id: transcript.id,
+        text: transcript.text,
+        score: 1,
+        metadata: {
+          timestamp: transcript.timestamp,
+          recordingId: transcript.recordingId,
+          title: (transcript as any).title || 'Untitled',
+          topic: (transcript as any).topic || 'General',
+        },
+      };
+    }
+
+    console.log(`Document not found with ID: ${documentId}`);
+    return null;
+  }
+
   async deleteDocument(documentId: string): Promise<void> {
     try {
       const response = await fetch(`${this.baseUrl}/projects/${this.projectId}/documents/${documentId}`, {
