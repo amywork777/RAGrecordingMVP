@@ -2,6 +2,16 @@
 
 A full-stack application for AI-powered wearable devices that records, transcribes, and enables intelligent search through conversations using RAG (Retrieval-Augmented Generation) technology.
 
+## What's New (highlights)
+- Persisted AI title and summary in Supabase to avoid regeneration on load
+- Duration captured for audio uploads and recordings, displayed as N/A when unknown
+- Copy-to-clipboard report in Mobile Record screen
+- Backend-only diarization strategy: non‑diarized first pass → LLM single vs multi → diarize only if multi, with smoothing
+- Sync endpoint to backfill ZeroEntropy docs into Supabase
+- Auto-detect API base URL for Expo LAN
+
+> more testing needed to be done for multi-speaker conversation
+
 ## Architecture Overview
 
 ```
@@ -212,7 +222,7 @@ Troubleshooting:
 
 ## API Endpoints
 ### GET /api/zeroentropy/documents
-Returns recent documents from ZeroEntropy. When Supabase is configured, each document includes `aiTitle` and `aiSummary` fields sourced from the database (no regeneration on app load).
+Returns recent documents from ZeroEntropy. When Supabase is configured, each document includes `aiTitle` and `aiSummary` (persisted), and `durationSeconds` when available.
 
 ### POST /api/zeroentropy/upload-text
 Upload raw text and store as a document in ZeroEntropy. If Supabase is configured, also upserts `documents` and writes the latest AI `title/summary`.
@@ -223,6 +233,16 @@ Upload a file (.txt stored directly; .wav/.m4a/.mp4 transcribed first) and then 
 ### POST /api/zeroentropy/sync-to-supabase
 Backfill existing ZeroEntropy documents to Supabase in one call.
 Body: `{ "limit": 500, "includeAnnotations": true }`
+
+## Diarization Strategy
+- Non‑diarized first pass (AssemblyAI) to get a clean transcript
+- LLM classification (OpenAI) to decide single vs multi speaker (text-only heuristic)
+- If multi, diarized pass with backend smoothing:
+  - Collapse to single when one speaker dominates talk-time
+  - Absorb short flip segments
+  - Merge adjacent same‑speaker utterances
+
+> more testing needed to be done for multi-speaker conversation
 
 
 ### POST /api/transcribe
