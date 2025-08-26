@@ -215,13 +215,38 @@ class TranscriptionService {
         return { title: 'Brief Note', summary: transcription.substring(0, 100) };
       }
       const completion = await this.openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: 'You are a helpful assistant that creates concise titles and summaries for transcribed conversations or notes.' },
-          { role: 'user', content: `Based on the following transcription, generate:\n1. A short, descriptive title (max 50 characters)\n2. A 2-3 sentence summary highlighting the key points\n\nTranscription:\n${transcription.substring(0, 3000)} // Limit context to save tokens\n\nPlease respond in the following JSON format:\n{\n  "title": "Your title here",\n  "summary": "Your 2-3 sentence summary here"\n}` },
+          { 
+            role: 'system', 
+            content: 'You are an expert at creating compelling, specific titles and summaries for voice recordings and transcribed conversations. Create titles that capture the essence, main topic, or key insight rather than generic descriptions. Focus on what makes this recording unique or interesting.' 
+          },
+          { 
+            role: 'user', 
+            content: `Analyze this transcription and create:
+
+1. A compelling, specific title (35-45 characters) that captures the main topic, key insight, or most interesting aspect. Avoid generic words like "discussion", "conversation", "recording", "meeting". Focus on the actual subject matter.
+
+2. A concise 2-3 sentence summary highlighting the key points, decisions, or insights.
+
+Examples of good titles:
+- "Axolotl Regeneration Research Breakthrough"
+- "Q3 Marketing Budget Reallocation Plan" 
+- "Kubernetes Migration Strategy Meeting"
+- "Customer Feedback on Mobile App UX"
+
+Transcription:
+${transcription.substring(0, 3000)}
+
+Respond in JSON format:
+{
+  "title": "Your compelling title here",
+  "summary": "Your detailed summary here"
+}` 
+          },
         ],
-        temperature: 0.7,
-        max_tokens: 200,
+        temperature: 0.8,
+        max_tokens: 300,
         response_format: { type: "json_object" },
       });
       const response = completion.choices[0].message.content;

@@ -11,6 +11,7 @@ import {
   Animated,
   Dimensions,
   TextInput,
+  AppState,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -86,6 +87,27 @@ export default function RecordScreen({ route }: any) {
     };
   }, [isRecording]);
 
+  // Handle app state changes to maintain recording in background
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: string) => {
+      console.log('App state changed to:', nextAppState);
+      
+      if (nextAppState === 'background' && isRecording) {
+        console.log('App backgrounded while recording - maintaining recording session');
+        // Recording should continue in background with audio mode configured
+      } else if (nextAppState === 'active' && isRecording) {
+        console.log('App foregrounded while recording - recording session active');
+        // Verify recording is still active when returning to foreground
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    
+    return () => {
+      subscription?.remove();
+    };
+  }, [isRecording]);
+
   useEffect(() => {
     BLEService.on('deviceConnected', handleDeviceConnected);
     BLEService.on('deviceDisconnected', handleDeviceDisconnected);
@@ -153,10 +175,12 @@ export default function RecordScreen({ route }: any) {
 
   const loadTranscriptsFromBackend = async () => {
     try {
-      const recentTranscripts = await APIService.getRecentTranscripts(50);
+      console.log('Loading transcripts from backend...');
+      const recentTranscripts = await APIService.getRecentTranscripts(100);
+      console.log('Received', recentTranscripts?.length, 'transcripts from backend');
       
       if (recentTranscripts && recentTranscripts.length > 0) {
-        const formattedTranscripts: Transcript[] = recentTranscripts.map((t: any) => {
+        const backendTranscripts: Transcript[] = recentTranscripts.map((t: any) => {
           const fallbackTitle = (t.title && t.title.trim().length > 0)
             ? t.title
             : (t.text ? (t.text.split('\n')[0] || t.text).slice(0, 50) : 'Untitled');
@@ -176,9 +200,25 @@ export default function RecordScreen({ route }: any) {
             durationSeconds: t.durationSeconds ?? t.duration_seconds ?? null,
           } as any;
         });
+
+        // Merge with existing local transcripts that might not be in backend yet
+        const localTranscripts = transcripts.filter(localT => {
+          // Keep local transcripts that aren't found in backend (by recording ID)
+          const foundInBackend = backendTranscripts.some(backendT => backendT.id === localT.id);
+          if (!foundInBackend) {
+            console.log(`Preserving local transcript not yet in backend: ${localT.id}`);
+          }
+          return !foundInBackend;
+        });
         
-        setTranscripts(formattedTranscripts);
-        setFilteredTranscripts(formattedTranscripts);
+        // Combine and sort by timestamp (newest first)
+        const mergedTranscripts = [...localTranscripts, ...backendTranscripts]
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        
+        console.log(`Merging transcripts: ${localTranscripts.length} local + ${backendTranscripts.length} backend = ${mergedTranscripts.length} total`);
+        setTranscripts(mergedTranscripts);
+        setFilteredTranscripts(mergedTranscripts);
+        console.log('Transcripts updated with merged data');
       }
     } catch (error) {
       console.error('Error loading transcripts:', error);
@@ -187,6 +227,7 @@ export default function RecordScreen({ route }: any) {
 
   // Filter transcripts based on search query
   useEffect(() => {
+    console.log('Filtering transcripts, total:', transcripts.length, 'search:', searchQuery);
     if (!searchQuery.trim()) {
       setFilteredTranscripts(transcripts);
     } else {
@@ -200,6 +241,7 @@ export default function RecordScreen({ route }: any) {
       });
       setFilteredTranscripts(filtered);
     }
+    console.log('Filtered transcripts count:', filteredTranscripts.length);
   }, [searchQuery, transcripts]);
 
   const formatDuration = (seconds?: number | null) => {
@@ -272,16 +314,48 @@ export default function RecordScreen({ route }: any) {
         if (audioUri) {
           const base64Audio = await AudioRecordingService.getRecordingBase64();
           console.log('Base64 audio length:', base64Audio?.length);
+          console.log('Audio URI:', audioUri);
           
           if (base64Audio) {
             console.log('Sending to API...');
-            const response = await APIService.sendAudioBase64(base64Audio, currentRecordingId, 'm4a');
-            
-            if (response.transcription) {
-              console.log('Transcription received:', response.transcription);
-              setTimeout(loadTranscriptsFromBackend, 2000);
+            try {
+              const response = await APIService.sendAudioBase64(base64Audio, currentRecordingId, 'm4a');
+              console.log('API Response:', response);
+              
+              if (response.transcription) {
+                console.log('Transcription received:', response.transcription);
+                
+                // Immediately add the new transcript to the UI
+                const newTranscript = {
+                  id: currentRecordingId,
+                  text: response.transcription,
+                  title: response.title,
+                  summary: response.summary,
+                  timestamp: new Date(response.timestamp),
+                  aiTitle: response.title,
+                  aiSummary: response.summary,
+                };
+                
+                console.log('Adding transcript to UI:', newTranscript);
+                setTranscripts(prev => [newTranscript as any, ...prev]);
+                
+                // Refresh from backend after a longer delay to allow ZeroEntropy indexing
+                setTimeout(() => {
+                  console.log('Refreshing transcripts from backend after recording...');
+                  loadTranscriptsFromBackend();
+                }, 10000); // Increased delay to 10 seconds to ensure ZeroEntropy indexing completes
+              } else {
+                console.log('No transcription in response');
+              }
+            } catch (apiError) {
+              console.error('API call failed:', apiError);
+              Alert.alert('Transcription Error', 'Failed to transcribe audio. Check backend connection.');
             }
+          } else {
+            console.log('No base64 audio data available');
           }
+        } else {
+          console.log('No audio URI from recording');
         }
       } catch (error) {
         console.error('Failed to stop recording:', error);

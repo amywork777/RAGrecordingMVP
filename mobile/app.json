@@ -18,9 +18,11 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.taiyaki.tai",
       "usesNonExemptEncryption": false,
+      "backgroundModes": ["audio"],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSMicrophoneUsageDescription": "This app needs access to the microphone to record audio for transcription."
+        "NSMicrophoneUsageDescription": "This app needs access to the microphone to record audio for transcription.",
+        "UIBackgroundModes": ["audio"]
       }
     },
     "android": {

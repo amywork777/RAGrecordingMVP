@@ -19,6 +19,9 @@ class AudioRecordingService {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+        staysActiveInBackground: true, // Enable background recording
       });
       console.log('Audio mode set successfully');
     } catch (error) {
@@ -31,10 +34,8 @@ class AudioRecordingService {
     try {
       console.log('AudioRecordingService: startRecording called');
       
-      if (this.recording) {
-        console.log('Existing recording found, stopping it first');
-        await this.stopRecording();
-      }
+      // Always clean up any existing recording first
+      await this.cleanup();
 
       console.log('Initializing audio...');
       await this.initialize();
@@ -48,7 +49,34 @@ class AudioRecordingService {
       console.log('Recording started successfully');
     } catch (error) {
       console.error('Failed to start recording:', error);
+      // Ensure cleanup on error
+      await this.cleanup();
       throw error;
+    }
+  }
+
+  // Helper method to properly clean up recording resources
+  private async cleanup(): Promise<void> {
+    try {
+      if (this.recording) {
+        console.log('Cleaning up existing recording...');
+        const status = await this.recording.getStatusAsync();
+        
+        if (status.isRecording) {
+          console.log('Stopping active recording...');
+          await this.recording.stopAndUnloadAsync();
+        } else if (status.isDoneRecording) {
+          console.log('Unloading completed recording...');
+          await this.recording.unloadAsync();
+        }
+        
+        this.recording = null;
+        console.log('Recording cleanup completed');
+      }
+    } catch (error) {
+      console.error('Error during cleanup:', error);
+      // Force reset even if cleanup fails
+      this.recording = null;
     }
   }
 
@@ -61,16 +89,32 @@ class AudioRecordingService {
         return null;
       }
 
-      console.log('Stopping and unloading recording...');
-      await this.recording.stopAndUnloadAsync();
-      const uri = this.recording.getURI();
-      this.recordingUri = uri;
-      this.recording = null;
+      let uri: string | null = null;
+      
+      try {
+        const status = await this.recording.getStatusAsync();
+        if (status.isRecording) {
+          console.log('Stopping and unloading recording...');
+          await this.recording.stopAndUnloadAsync();
+          uri = this.recording.getURI();
+          this.recordingUri = uri;
+        } else {
+          console.log('Recording not active, getting URI...');
+          uri = this.recording.getURI();
+          this.recordingUri = uri;
+        }
+      } catch (error) {
+        console.error('Error stopping recording:', error);
+      }
 
+      // Always cleanup after stopping
+      this.recording = null;
       console.log('Recording stopped, saved to:', uri);
       return uri;
     } catch (error) {
       console.error('Failed to stop recording:', error);
+      // Ensure cleanup even on error
+      this.recording = null;
       return null;
     }
   }

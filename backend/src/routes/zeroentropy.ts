@@ -62,12 +62,15 @@ router.get('/documents', async (req: Request, res: Response) => {
           score: 1.0,
           path: doc.path,
           indexStatus: doc.index_status,
+          // Use AI titles/summaries from ZeroEntropy metadata if available
+          aiTitle: doc.metadata?.aiTitle || doc.metadata?.title || 'Untitled',
+          aiSummary: doc.metadata?.aiSummary || doc.metadata?.summary || '',
         };
         try {
           if (SupabaseService.isConfigured()) {
             const ann = await SupabaseService.fetchLatestAnnotationByPath('ai-wearable-transcripts', doc.path);
             if (ann) {
-              base.aiTitle = ann.title;
+              base.aiTitle = ann.title;  // Supabase takes precedence over ZeroEntropy metadata
               base.aiSummary = ann.summary;
             }
             const supDoc = await SupabaseService.fetchDocumentByPath('ai-wearable-transcripts', doc.path);
@@ -238,6 +241,62 @@ router.post('/upload-text', async (req: Request, res: Response) => {
     console.log(`- Text length: ${text.length} characters`);
     console.log(`- First 100 chars: ${text.substring(0, 100)}...`);
 
+    // Generate AI title/summary if not provided in metadata
+    const hasAiTitleSummary = metadata?.aiTitle && metadata?.aiSummary;
+    let aiTitle = metadata?.aiTitle;
+    let aiSummary = metadata?.aiSummary;
+    
+    if (!hasAiTitleSummary && text.length > 50) {
+      try {
+        console.log('Attempting OpenAI title/summary generation...');
+        const OpenAI = (await import('openai')).default;
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [
+            { 
+              role: 'system', 
+              content: 'You are an expert at creating compelling, specific titles and summaries for voice recordings and transcribed conversations. Create titles that capture the essence, main topic, or key insight rather than generic descriptions. Focus on what makes this recording unique or interesting.' 
+            },
+            { 
+              role: 'user', 
+              content: `Analyze this transcription and create:
+
+1. A compelling, specific title (35-45 characters) that captures the main topic, key insight, or most interesting aspect. Avoid generic words like "discussion", "conversation", "recording", "meeting". Focus on the actual subject matter.
+
+2. A concise 2-3 sentence summary highlighting the key points, decisions, or insights.
+
+Examples of good titles:
+- "Climate Impact on Local Bee Colonies"
+- "Q3 Marketing Budget Reallocation Plan" 
+- "Weekend Hiking Adventure in Yosemite"
+- "Customer Feedback on Mobile App UX"
+
+Content: ${text.substring(0, 3000)}
+
+Respond in JSON format:
+{
+  "title": "Your compelling title here",
+  "summary": "Your detailed summary here"
+}` 
+            },
+          ],
+          temperature: 0.8,
+          max_tokens: 300,
+          response_format: { type: "json_object" },
+        });
+        const result = JSON.parse(completion.choices[0].message.content || '{}');
+        aiTitle = result.title || (text.split('\n')[0].slice(0, 50) || 'Untitled');
+        aiSummary = result.summary || (text.slice(0, 160) + (text.length > 160 ? '…' : ''));
+        console.log(`OpenAI generated title: "${aiTitle}" | Summary: "${aiSummary.substring(0, 100)}..."`);
+      } catch (e) {
+        console.warn('OpenAI title generation failed:', e);
+        aiTitle = text.split('\n')[0].slice(0, 50) || 'Untitled';
+        aiSummary = text.slice(0, 160) + (text.length > 160 ? '…' : '');
+        console.log(`Using fallback title: "${aiTitle}"`);
+      }
+    }
+
     const response = await client.documents.add({
       collection_name,
       path,
@@ -247,6 +306,8 @@ router.post('/upload-text', async (req: Request, res: Response) => {
       },
       metadata: {
         timestamp: new Date().toISOString(),
+        aiTitle: aiTitle || 'Untitled',
+        aiSummary: aiSummary || 'No summary available',
         ...metadata,
       } as any,
     } as any);
@@ -373,9 +434,57 @@ router.post('/sync-to-supabase', async (req: Request, res: Response) => {
         upserted += 1;
         if (includeAnnotations) {
           const text: string = d?.content || '';
-          const { title, summary } = await ClaudeService.generateTitleAndSummary(text);
-          await SupabaseService.setLatestAnnotation(docId, title, summary, 'claude');
-          annotated += 1;
+          // Use the same OpenAI logic as the improved transcription endpoint
+          try {
+            console.log(`Generating improved AI title for sync: ${text.substring(0, 60)}...`);
+            const OpenAI = (await import('openai')).default;
+            const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+            const completion = await openai.chat.completions.create({
+              model: 'gpt-4o-mini',
+              messages: [
+                { 
+                  role: 'system', 
+                  content: 'You are an expert at creating compelling, specific titles and summaries for voice recordings and transcribed conversations. Create titles that capture the essence, main topic, or key insight rather than generic descriptions. Focus on what makes this recording unique or interesting.' 
+                },
+                { 
+                  role: 'user', 
+                  content: `Analyze this transcription and create:
+
+1. A compelling, specific title (35-45 characters) that captures the main topic, key insight, or most interesting aspect. Avoid generic words like "discussion", "conversation", "recording", "meeting". Focus on the actual subject matter.
+
+2. A concise 2-3 sentence summary highlighting the key points, decisions, or insights.
+
+Examples of good titles:
+- "Compact PCB Cutting Technique Revealed"
+- "Strategic Roadmap for Q2 Priorities" 
+- "Identifying Billion-Dollar Founders"
+- "From Startups to AI: Career Journey"
+
+Content: ${text.substring(0, 3000)}
+
+Respond in JSON format:
+{
+  "title": "Your compelling title here",
+  "summary": "Your detailed summary here"
+}` 
+                },
+              ],
+              temperature: 0.8,
+              max_tokens: 300,
+              response_format: { type: "json_object" },
+            });
+            const result = JSON.parse(completion.choices[0].message.content || '{}');
+            const title = result.title || (text.split('\n')[0].slice(0, 50) || 'Untitled');
+            const summary = result.summary || (text.slice(0, 220) + (text.length > 220 ? '…' : ''));
+            console.log(`Generated improved title: "${title}"`);
+            await SupabaseService.setLatestAnnotation(docId, title, summary, 'openai');
+            annotated += 1;
+          } catch (e) {
+            console.warn('OpenAI title generation failed, using Claude fallback:', e);
+            const { title, summary } = await ClaudeService.generateTitleAndSummary(text);
+            await SupabaseService.setLatestAnnotation(docId, title, summary, 'claude');
+            annotated += 1;
+          }
         }
       }
     }

@@ -12,7 +12,8 @@ class MockDataService {
   private transcripts: StoredTranscript[] = [];
 
   constructor() {
-    this.initializeMockData();
+    // Mock data disabled - using real ZeroEntropy data only
+    console.log('MockDataService: Mock data disabled, using real data only');
   }
 
   private initializeMockData() {

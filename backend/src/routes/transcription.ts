@@ -57,6 +57,8 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
         audioSize: `${req.file?.size as number}`,
         mimeType: req.file.mimetype,
         source: 'mobile-transcription',
+        aiTitle: result.title || 'Untitled Recording',
+        aiSummary: result.summary || 'No summary available',
       } as any,
     } as any);
 
@@ -131,6 +133,8 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
         recordingId: recordingId || 'unknown',
         chunksCount: `${chunks.length}`,
         source: 'mobile-transcription-batch',
+        aiTitle: result.title || 'Untitled Recording',
+        aiSummary: result.summary || 'No summary available',
       } as any,
     } as any);
 

@@ -65,11 +65,19 @@ interface SearchResponse {
 
 class APIService {
   async sendAudioBase64(base64Audio: string, recordingId: string, format: string = 'm4a'): Promise<TranscriptionResponse> {
+    console.log('APIService: Sending audio to transcribe endpoint');
+    console.log('Recording ID:', recordingId);
+    console.log('Format:', format);
+    console.log('Base64 length:', base64Audio.length);
+    console.log('API URL:', `${API_BASE_URL}/api/transcribe`);
+    
     const formData = new FormData();
     
     // Create a file-like object from base64
     const mimeType = format === 'wav' ? 'audio/wav' : 'audio/m4a';
     const filename = format === 'wav' ? 'recording.wav' : 'recording.m4a';
+    
+    console.log('Creating FormData with:', { mimeType, filename });
     
     formData.append('audio', {
       uri: `data:${mimeType};base64,${base64Audio}`,
@@ -78,16 +86,24 @@ class APIService {
     } as any);
     formData.append('recordingId', recordingId);
 
+    console.log('Making fetch request...');
     const response = await fetch(`${API_BASE_URL}/api/transcribe`, {
       method: 'POST',
       body: formData,
     });
 
+    console.log('Response status:', response.status);
+    console.log('Response headers:', response.headers);
+
     if (!response.ok) {
-      throw new Error(`Transcription failed: ${response.statusText}`);
+      const errorText = await response.text();
+      console.error('Transcription failed:', errorText);
+      throw new Error(`Transcription failed: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
-    return response.json();
+    const jsonResponse = await response.json();
+    console.log('Transcription response:', jsonResponse);
+    return jsonResponse;
   }
 
   async searchTranscripts(query: string): Promise<SearchResponse> {

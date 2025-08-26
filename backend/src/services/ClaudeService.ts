@@ -13,7 +13,7 @@ class ClaudeService {
         return 'The recording did not contain any speech or detectable audio content.';
       }
       const snippet = trimmed.slice(0, 220);
-      return `Summary (fallback): ${snippet}${trimmed.length > 220 ? '…' : ''}`;
+      return snippet + (trimmed.length > 220 ? '…' : '');
     }
 
     try {
@@ -53,13 +53,13 @@ class ClaudeService {
       // Fallback if unexpected shape
       return trimmed.length === 0
         ? 'The recording did not contain any speech or detectable audio content.'
-        : `Summary (fallback): ${trimmed.slice(0, 220)}${trimmed.length > 220 ? '…' : ''}`;
+        : trimmed.slice(0, 220) + (trimmed.length > 220 ? '…' : '');
     } catch (err) {
       // Network/API errors → fallback
       if (trimmed.length === 0) {
         return 'The recording did not contain any speech or detectable audio content.';
       }
-      return `Summary (fallback): ${trimmed.slice(0, 220)}${trimmed.length > 220 ? '…' : ''}`;
+      return trimmed.slice(0, 220) + (trimmed.length > 220 ? '…' : '');
     }
   }
 
@@ -74,7 +74,7 @@ class ClaudeService {
       }
       const firstSentence = trimmed.split(/(?<=[.!?])\s/)[0] || trimmed.slice(0, 60);
       const title = (firstSentence.length > 60 ? firstSentence.slice(0, 57) + '…' : firstSentence).replace(/\n+/g, ' ');
-      const summary = `Summary (fallback): ${trimmed.slice(0, 220)}${trimmed.length > 220 ? '…' : ''}`;
+      const summary = trimmed.slice(0, 220) + (trimmed.length > 220 ? '…' : '');
       return { title, summary };
     };
 
@@ -92,7 +92,27 @@ class ClaudeService {
             content: [
               {
                 type: 'text',
-                text: `You are generating a short title and a brief summary for a voice transcription. Return strictly a JSON object with keys \"title\" and \"summary\". If there is no speech or the content is empty, use title: "No Speech Detected" and summary: "The recording did not contain any speech or detectable audio content."\n\nTranscript:\n${trimmed}`,
+                text: `You are an expert at creating compelling, specific titles and summaries for voice recordings and transcribed conversations. 
+
+Create a JSON response with:
+1. A compelling, specific title (35-45 characters) that captures the main topic, key insight, or most interesting aspect. Avoid generic words like "discussion", "conversation", "recording", "meeting". Focus on the actual subject matter.
+
+2. A concise 2-3 sentence summary highlighting the key points, decisions, or insights.
+
+If there is no speech or the content is empty, use:
+- title: "No Speech Detected"
+- summary: "The recording did not contain any speech or detectable audio content."
+
+Examples of good titles:
+- "Axolotl Regeneration Research Breakthrough"
+- "Q3 Marketing Budget Reallocation Plan"
+- "Customer Feedback on Mobile App UX"
+- "Weekend Hiking Adventure in Yosemite"
+
+Transcript:
+${trimmed}
+
+Return strictly a JSON object:`,
               },
             ],
           },
