@@ -1,17 +1,46 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { View, Platform } from 'react-native';
+import { View, Platform, Linking } from 'react-native';
 
 import RecordScreen from './src/screens/RecordScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import { colors } from './src/theme/colors';
+import DeepLinkService from './src/services/DeepLinkService';
 
 const Tab = createBottomTabNavigator();
 
 export default function App() {
+  
+  function handleURL(url: string | null) {
+    console.log('Deep link received:', url);
+    
+    if (!url || !url.includes('tai://')) return;
+    
+    const action = url.replace('tai://', '').toLowerCase();
+    console.log('Parsed action:', action);
+    
+    // Emit event instead of direct calls
+    DeepLinkService.emit('deeplink', { action });
+  }
+
+  useEffect(() => {
+    const getInitialURL = async () => {
+      try {
+        const initialUrl = await Linking.getInitialURL();
+        handleURL(initialUrl);
+      } catch (error) {
+        console.log('Error getting initial URL:', error);
+      }
+    };
+    getInitialURL();
+
+    const subscription = Linking.addEventListener('url', ({ url }) => handleURL(url));
+    return () => subscription?.remove();
+  }, []);
+
   return (
     <NavigationContainer>
       <Tab.Navigator

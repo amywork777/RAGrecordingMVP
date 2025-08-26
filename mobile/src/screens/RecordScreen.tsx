@@ -18,6 +18,7 @@ import * as Clipboard from 'expo-clipboard';
 import BLEService from '../services/BLEService';
 import APIService from '../services/APIService';
 import AudioRecordingService from '../services/AudioRecordingService';
+import DeepLinkService from '../services/DeepLinkService';
 import uuid from 'react-native-uuid';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
@@ -54,6 +55,36 @@ export default function RecordScreen({ route }: any) {
   const scrollViewRef = useRef<ScrollView>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredTranscripts, setFilteredTranscripts] = useState<Transcript[]>([]);
+
+  // Handle deep linking via events
+  useEffect(() => {
+    const handleDeepLink = (data: { action: string }) => {
+      console.log('RecordScreen: Received deep link:', data.action);
+      
+      setTimeout(() => {
+        if (data.action === 'record' || data.action === 'start') {
+          console.log('RecordScreen: Starting recording from deep link');
+          if (!isRecording) {
+            toggleRecording();
+          }
+        } else if (data.action === 'stop') {
+          console.log('RecordScreen: Stopping recording from deep link');
+          if (isRecording) {
+            toggleRecording();
+          }
+        } else if (data.action === 'toggle') {
+          console.log('RecordScreen: Toggling recording from deep link');
+          toggleRecording();
+        }
+      }, 500);
+    };
+
+    DeepLinkService.on('deeplink', handleDeepLink);
+    
+    return () => {
+      DeepLinkService.off('deeplink', handleDeepLink);
+    };
+  }, [isRecording]);
 
   useEffect(() => {
     BLEService.on('deviceConnected', handleDeviceConnected);
@@ -228,16 +259,22 @@ export default function RecordScreen({ route }: any) {
   };
 
   const toggleRecording = async () => {
+    console.log('toggleRecording called, current isRecording:', isRecording);
+    
     if (isRecording) {
+      console.log('Stopping recording...');
       try {
         setIsLoading(true);
         
         const audioUri = await AudioRecordingService.stopRecording();
+        console.log('Audio stopped, URI:', audioUri);
         
         if (audioUri) {
           const base64Audio = await AudioRecordingService.getRecordingBase64();
+          console.log('Base64 audio length:', base64Audio?.length);
           
           if (base64Audio) {
+            console.log('Sending to API...');
             const response = await APIService.sendAudioBase64(base64Audio, currentRecordingId, 'm4a');
             
             if (response.transcription) {
@@ -253,19 +290,24 @@ export default function RecordScreen({ route }: any) {
         setIsLoading(false);
         setIsRecording(false);
         setCurrentRecordingId('');
+        console.log('Recording stopped, isRecording set to false');
       }
     } else {
+      console.log('Starting recording...');
       try {
         const recordingId = uuid.v4() as string;
         setCurrentRecordingId(recordingId);
+        console.log('Generated recording ID:', recordingId);
         
+        console.log('Calling AudioRecordingService.startRecording()...');
         await AudioRecordingService.startRecording();
         setIsRecording(true);
-        console.log('Audio recording started');
+        console.log('Audio recording started successfully, isRecording set to true');
       } catch (error) {
         console.error('Failed to start recording:', error);
         Alert.alert('Recording Error', 'Failed to start recording. Please check microphone permissions.');
         setIsRecording(false);
+        console.log('Recording failed, isRecording set to false');
       }
     }
   };

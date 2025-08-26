@@ -1,7 +1,9 @@
 {
   "expo": {
-    "name": "mobile",
+    "name": "Tai",
     "slug": "mobile",
+    "scheme": "tai",
+    "owner": "amzyst",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,7 +15,13 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.taiyaki.tai",
+      "usesNonExemptEncryption": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "This app needs access to the microphone to record audio for transcription."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -24,6 +32,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f02e7531-5571-4df9-86ed-d8ca26837f85"
+      }
     }
   }
 }
