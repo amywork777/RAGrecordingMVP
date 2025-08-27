@@ -20,7 +20,8 @@
           ],
           "bluetoothAlwaysPermission": "Allow $(PRODUCT_NAME) to connect to bluetooth devices"
         }
-      ]
+      ],
+      "expo-font"
     ],
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -30,10 +31,6 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.taiyaki.tai",
-      "usesNonExemptEncryption": false,
-      "backgroundModes": [
-        "audio"
-      ],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSMicrophoneUsageDescription": "This app needs access to the microphone to record audio for transcription.",
@@ -64,7 +61,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "7b9e1923-9f5c-4df9-be7f-a4cb349e59e4"
+        "projectId": "dab6d1d9-5c03-49e7-847e-c804931d8860"
       }
     }
   }

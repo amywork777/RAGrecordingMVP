@@ -42,6 +42,9 @@ interface Transcript {
   aiSummary?: string;
   durationSeconds?: number | null;
   duration_seconds?: number | null;
+  localAudioPath?: string; // Local WAV/M4A file path
+  remoteAudioUrl?: string; // Backend audio URL
+  source?: 'ble' | 'recording' | 'upload'; // Track where audio came from
 }
 
 export default function RecordScreen({ route }: any) {
@@ -191,6 +194,11 @@ export default function RecordScreen({ route }: any) {
       console.log('Received', recentTranscripts?.length, 'transcripts from backend');
       
       if (recentTranscripts && recentTranscripts.length > 0) {
+        // Create a map of current transcripts to preserve local audio paths
+        const localTranscriptMap = new Map(
+          transcripts.map(t => [t.id, t])
+        );
+        
         const backendTranscripts: Transcript[] = recentTranscripts.map((t: any) => {
           const fallbackTitle = (t.title && t.title.trim().length > 0)
             ? t.title
@@ -198,6 +206,10 @@ export default function RecordScreen({ route }: any) {
           const fallbackSummary = (t.summary && t.summary.trim().length > 0)
             ? t.summary
             : (t.text ? (t.text.slice(0, 160) + (t.text.length > 160 ? '…' : '')) : '');
+          
+          // Check if we have local data for this transcript
+          const localData = localTranscriptMap.get(t.id);
+          
           return {
             id: t.id,
             text: t.text,
@@ -207,26 +219,28 @@ export default function RecordScreen({ route }: any) {
             path: t.path,
             aiTitle: t.aiTitle || fallbackTitle,
             aiSummary: t.aiSummary || fallbackSummary,
-            // @ts-ignore
             durationSeconds: t.durationSeconds ?? t.duration_seconds ?? null,
+            // Preserve local audio path if we have it
+            localAudioPath: localData?.localAudioPath,
+            remoteAudioUrl: t.audioUrl || localData?.remoteAudioUrl,
+            source: localData?.source || 'backend',
           } as any;
         });
 
-        // Merge with existing local transcripts that might not be in backend yet
-        const localTranscripts = transcripts.filter(localT => {
-          // Keep local transcripts that aren't found in backend (by recording ID)
+        // Find transcripts that are local-only (not yet in backend)
+        const localOnlyTranscripts = transcripts.filter(localT => {
           const foundInBackend = backendTranscripts.some(backendT => backendT.id === localT.id);
-          if (!foundInBackend) {
+          if (!foundInBackend && localT.localAudioPath) {
             console.log(`Preserving local transcript not yet in backend: ${localT.id}`);
           }
-          return !foundInBackend;
+          return !foundInBackend && localT.localAudioPath; // Only keep if it has local data
         });
         
         // Combine and sort by timestamp (newest first)
-        const mergedTranscripts = [...localTranscripts, ...backendTranscripts]
+        const mergedTranscripts = [...localOnlyTranscripts, ...backendTranscripts]
           .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
         
-        console.log(`Merging transcripts: ${localTranscripts.length} local + ${backendTranscripts.length} backend = ${mergedTranscripts.length} total`);
+        console.log(`Merging transcripts: ${localOnlyTranscripts.length} local-only + ${backendTranscripts.length} backend = ${mergedTranscripts.length} total`);
         setTranscripts(mergedTranscripts);
         setFilteredTranscripts(mergedTranscripts);
         console.log('Transcripts updated with merged data');
@@ -328,7 +342,37 @@ export default function RecordScreen({ route }: any) {
           console.log('Audio URI:', audioUri);
           
           if (base64Audio) {
+            // Save recording to organized storage
+            const now = new Date();
+            const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            const recordingsDir = `${FileSystem.documentDirectory}recordings/`;
+            const monthDir = `${recordingsDir}${yearMonth}/`;
+            
+            // Ensure directories exist
+            const recordingsDirInfo = await FileSystem.getInfoAsync(recordingsDir);
+            if (!recordingsDirInfo.exists) {
+              await FileSystem.makeDirectoryAsync(recordingsDir, { intermediates: true });
+            }
+            
+            const monthDirInfo = await FileSystem.getInfoAsync(monthDir);
+            if (!monthDirInfo.exists) {
+              await FileSystem.makeDirectoryAsync(monthDir, { intermediates: true });
+            }
+            
+            // Save m4a file locally
+            const timestamp = now.toISOString().replace(/[:.]/g, '-');
+            const fileName = `recording_${timestamp}.m4a`;
+            const localAudioPath = `${monthDir}${currentRecordingId}_${fileName}`;
+            
+            await FileSystem.writeAsStringAsync(
+              localAudioPath,
+              base64Audio,
+              { encoding: FileSystem.EncodingType.Base64 }
+            );
+            
+            console.log(`Audio saved locally to: ${localAudioPath}`);
             console.log('Sending to API...');
+            
             try {
               const response = await APIService.sendAudioBase64(base64Audio, currentRecordingId, 'm4a');
               console.log('API Response:', response);
@@ -336,7 +380,7 @@ export default function RecordScreen({ route }: any) {
               if (response.transcription) {
                 console.log('Transcription received:', response.transcription);
                 
-                // Immediately add the new transcript to the UI
+                // Immediately add the new transcript to the UI with local audio path
                 const newTranscript = {
                   id: currentRecordingId,
                   text: response.transcription,
@@ -345,16 +389,19 @@ export default function RecordScreen({ route }: any) {
                   timestamp: new Date(response.timestamp),
                   aiTitle: response.title,
                   aiSummary: response.summary,
+                  localAudioPath: localAudioPath, // Store local audio path
+                  remoteAudioUrl: response.audioUrl, // Store remote URL if provided
+                  source: 'recording' as const, // Mark as recording source
                 };
                 
                 console.log('Adding transcript to UI:', newTranscript);
                 setTranscripts(prev => [newTranscript as any, ...prev]);
                 
-                // Refresh from backend after a longer delay to allow ZeroEntropy indexing
+                // Refresh from backend after a shorter delay
                 setTimeout(() => {
                   console.log('Refreshing transcripts from backend after recording...');
                   loadTranscriptsFromBackend();
-                }, 10000); // Increased delay to 10 seconds to ensure ZeroEntropy indexing completes
+                }, 3000); // Reduced delay to 3 seconds
               } else {
                 console.log('No transcription in response');
               }
@@ -613,7 +660,8 @@ export default function RecordScreen({ route }: any) {
     }
     
     console.log('Connected to device, reading file info...');
-      
+    
+    try {
       // Get file info
       const fileInfo = await BLEFileTransferService.readFileInfo();
       console.log(`File to download: ${fileInfo.name} (${fileInfo.size} bytes)`);
@@ -625,33 +673,62 @@ export default function RecordScreen({ route }: any) {
       
       console.log(`Downloaded ${wavData.length} bytes`);
       
-      // Save WAV file to local storage
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const fileName = fileInfo.name || `XIAO_${timestamp}.wav`;
-      const wavUri = FileSystem.documentDirectory + fileName;
+      // Validate WAV file size
+      if (wavData.length < 1000) {
+        Alert.alert('Transfer Incomplete', `WAV file too small: ${wavData.length} bytes. Expected at least 10KB for audio recording.`);
+        console.warn(`WAV transfer may be incomplete: ${wavData.length} bytes`);
+      } else {
+        console.log(`WAV file size looks good: ${(wavData.length / 1024).toFixed(1)} KB`);
+      }
       
+      // Create organized storage structure
+      const now = new Date();
+      const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const recordingsDir = `${FileSystem.documentDirectory}recordings/`;
+      const monthDir = `${recordingsDir}${yearMonth}/`;
+      
+      // Ensure directories exist
+      const recordingsDirInfo = await FileSystem.getInfoAsync(recordingsDir);
+      if (!recordingsDirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(recordingsDir, { intermediates: true });
+      }
+      
+      const monthDirInfo = await FileSystem.getInfoAsync(monthDir);
+      if (!monthDirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(monthDir, { intermediates: true });
+      }
+      
+      // Generate unique filename
+      const timestamp = now.toISOString().replace(/[:.]/g, '-');
+      const recordingId = uuid.v4() as string;
+      const fileName = fileInfo.name || `XIAO_${timestamp}.wav`;
+      const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const wavPath = `${monthDir}${recordingId}_${sanitizedFileName}`;
+      
+      // Save WAV file to organized location
       await FileSystem.writeAsStringAsync(
-        wavUri,
+        wavPath,
         Buffer.from(wavData).toString('base64'),
         { encoding: FileSystem.EncodingType.Base64 }
       );
       
-      console.log(`WAV file saved to: ${wavUri}`);
+      console.log(`WAV file saved to: ${wavPath}`);
       
-      // Process through existing transcription pipeline
+      // Process through transcription pipeline
       const formData = new FormData();
       formData.append('audio', {
-        uri: wavUri,
-        name: fileName,
+        uri: wavPath,
+        name: sanitizedFileName,
         type: 'audio/wav'
       } as any);
+      formData.append('recordingId', recordingId);
       
       console.log('Starting transcription...');
       const result = await APIService.transcribeAudio(formData);
       
-      // Add to transcripts list
+      // Add to transcripts list with local audio path
       const newTranscript: Transcript = {
-        id: uuid.v4() as string,
+        id: recordingId,
         text: result.text || '[No speech detected]',
         timestamp: new Date(),
         title: result.aiTitle,
@@ -660,15 +737,29 @@ export default function RecordScreen({ route }: any) {
         aiSummary: result.aiSummary,
         durationSeconds: result.durationSeconds,
         path: result.path,
+        localAudioPath: wavPath, // Store local WAV path
+        remoteAudioUrl: result.audioUrl, // Store remote URL if provided
+        source: 'ble', // Mark as BLE source
       };
       
       setTranscripts(prev => [newTranscript, ...prev]);
       
-      Alert.alert('Success', `File synced and transcribed successfully!\n\n${fileName}\n${wavData.length} bytes`);
+      // Also update filtered transcripts if search is active
+      if (searchQuery) {
+        setFilteredTranscripts(prev => [newTranscript, ...prev]);
+      }
+      
+      Alert.alert('Success', `File synced and transcribed successfully!\n\n${sanitizedFileName}\n${wavData.length} bytes`);
       
       // Clear selection after successful sync
       setSelectedDevice(null);
       setAvailableDevices([]);
+      
+      // Refresh from backend after a short delay to get complete metadata
+      setTimeout(() => {
+        console.log('Refreshing transcripts from backend after BLE sync...');
+        loadTranscriptsFromBackend();
+      }, 3000);
       
     } catch (error) {
       console.error('Sync failed:', error);

@@ -23,6 +23,18 @@ class TranscriptionService {
   // if multi, re-run with diarization (plus smoothing); finally generate title/summary.
   async transcribeAudio(audioBuffer: Buffer, format: string = 'wav', speakersExpected: number = 2): Promise<{transcription: string; title?: string; summary?: string}> {
     try {
+      console.log(`Attempting transcription of ${audioBuffer.length} bytes in ${format} format`);
+      
+      // Check buffer size
+      if (audioBuffer.length < 1000) {
+        console.warn(`Audio buffer too small: ${audioBuffer.length} bytes`);
+        return { 
+          transcription: '[Audio file too small for transcription]', 
+          title: 'Invalid Audio', 
+          summary: 'Audio file was too small to process.' 
+        };
+      }
+      
       let transcription: string;
       
       if (process.env.ASSEMBLYAI_API_KEY) {
@@ -48,9 +60,22 @@ class TranscriptionService {
     } catch (error: any) {
       console.error('Error transcribing audio:', error);
       console.error('Error details:', error.message, error.status);
+      console.error('Buffer size:', audioBuffer.length, 'bytes');
+      
+      // Try Whisper as fallback if AssemblyAI fails
+      if (process.env.OPENAI_API_KEY && error.message?.includes('Upload failed')) {
+        console.log('Trying Whisper fallback due to AssemblyAI error...');
+        try {
+          const transcription = await this.transcribeWithWhisper(audioBuffer, format);
+          const { title, summary } = await this.generateTitleAndSummary(transcription);
+          return { transcription, title, summary };
+        } catch (whisperError) {
+          console.error('Whisper fallback also failed:', whisperError);
+        }
+      }
       
       const transcription = this.getSimulatedTranscription();
-      return { transcription, title: 'Untitled Recording', summary: 'Failed to generate summary.' };
+      return { transcription, title: 'Transcription Failed', summary: 'Could not process audio file.' };
     }
   }
 

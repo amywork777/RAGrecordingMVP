@@ -17,9 +17,9 @@ class BLEFileTransferService {
   private fileName: string = '';
   private transferComplete: boolean = false;
   private credits: number = 0;
-  private subscription: any = null;
-
-  // UUIDs from hardware (config.h)
+  private totalPackets: number = 0;
+  
+  // UUIDs from hardware
   private readonly SERVICE_UUID = 'a3f9b7f0-52d1-4c7a-8f1c-7a1b9b2f0001';
   private readonly TX_DATA_UUID = 'a3f9b7f0-52d1-4c7a-8f1c-7a1b9b2f0002';
   private readonly RX_CREDITS_UUID = 'a3f9b7f0-52d1-4c7a-8f1c-7a1b9b2f0003';
@@ -29,7 +29,6 @@ class BLEFileTransferService {
     this.manager = new BleManager();
   }
 
-  // Initialize BLE manager
   async initialize(): Promise<void> {
     const state = await this.manager.state();
     if (state !== 'PoweredOn') {
@@ -44,13 +43,12 @@ class BLEFileTransferService {
     }
   }
 
-  // Scan for XIAO-REC devices (port from Python lines 66-105)
   async scanForDevices(timeout: number = 10000): Promise<Device[]> {
     console.log('BLE: Starting scan for XIAO-REC devices...');
     await this.initialize();
     
     const devices: Device[] = [];
-    const deviceMap = new Map<string, Device>(); // Prevent duplicates
+    const deviceMap = new Map<string, Device>();
     
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
@@ -60,7 +58,7 @@ class BLEFileTransferService {
       }, timeout);
 
       this.manager.startDeviceScan(
-        null, // Scan for ALL devices, no UUID filter
+        null,
         { allowDuplicates: false },
         (error, device) => {
           if (error) {
@@ -72,10 +70,8 @@ class BLEFileTransferService {
           }
 
           if (device) {
-            // Debug: log all discovered devices
             console.log(`BLE: Discovered device: ${device.name || 'Unknown'} (${device.id})`);
             
-            // Look for "XIAO-REC" device name or devices with our service
             if (device.name === 'XIAO-REC' || 
                 device.name?.includes('XIAO') || 
                 device.name?.includes('REC')) {
@@ -86,35 +82,22 @@ class BLEFileTransferService {
                 devices.push(device);
               }
             }
-            
-            // Also check service UUIDs as fallback (like Python version)
-            if (device.serviceUUIDs && device.serviceUUIDs.includes(this.SERVICE_UUID)) {
-              if (!deviceMap.has(device.id)) {
-                console.log(`BLE: ✓ Found device with matching service UUID: ${device.name || 'Unknown'} (${device.id})`);
-                deviceMap.set(device.id, device);
-                devices.push(device);
-              }
-            }
           }
         }
       );
     });
   }
 
-  // Connect to device (port from Python lines 107-123)
   async connect(device: Device): Promise<boolean> {
     try {
       console.log(`BLE: Connecting to ${device.name} (${device.id})...`);
       
-      // Connect to device
       this.device = await this.manager.connectToDevice(device.id);
       console.log('BLE: Connected, discovering services...');
       
-      // Discover all services and characteristics
       await this.device.discoverAllServicesAndCharacteristics();
       console.log('BLE: Services discovered');
       
-      // Reset transfer state
       this.reset();
       
       return true;
@@ -125,7 +108,6 @@ class BLEFileTransferService {
     }
   }
 
-  // Read file info (port from Python lines 125-153)
   async readFileInfo(): Promise<FileInfo> {
     if (!this.device) {
       throw new Error('Not connected to device');
@@ -138,17 +120,14 @@ class BLEFileTransferService {
         this.FILE_INFO_UUID
       );
       
-      // Decode base64 data
       if (!characteristic.value) {
         throw new Error('No data received from file info characteristic');
       }
       const data = Buffer.from(characteristic.value, 'base64');
       
-      // Parse [u32 size][name (null-terminated)]
       this.fileSize = data.readUInt32LE(0);
       const nameBytes = data.slice(4);
       
-      // Find null terminator
       const nullIndex = nameBytes.indexOf(0);
       if (nullIndex >= 0) {
         this.fileName = nameBytes.slice(0, nullIndex).toString('utf8');
@@ -157,6 +136,7 @@ class BLEFileTransferService {
       }
       
       console.log(`BLE: File info - Name: ${this.fileName}, Size: ${this.fileSize} bytes`);
+      
       return { size: this.fileSize, name: this.fileName };
     } catch (error) {
       console.error('BLE: Failed to read file info:', error);
@@ -164,7 +144,6 @@ class BLEFileTransferService {
     }
   }
 
-  // CRC16-CCITT (port from Python lines 54-64)
   private crc16_ccitt(data: Uint8Array): number {
     let crc = 0xFFFF;
     for (let i = 0; i < data.length; i++) {
@@ -180,7 +159,6 @@ class BLEFileTransferService {
     return crc;
   }
 
-  // Send credits (port from Python lines 155-161)
   async sendCredits(numCredits: number): Promise<void> {
     if (!this.device) return;
     
@@ -192,195 +170,222 @@ class BLEFileTransferService {
         data.toString('base64')
       );
       this.credits += numCredits;
-      console.log(`BLE: Sent ${numCredits} credits (total: ${this.credits})`);
     } catch (error) {
       console.error('BLE: Failed to send credits:', error);
     }
   }
 
-  // Process packet (port from Python lines 186-258)
-  private processPacket(data: Uint8Array): void {
-    if (data.length < 8) {
-      console.warn(`BLE: Packet too short: ${data.length} bytes`);
-      return;
-    }
-    
-    // Parse packet [seq32|len16|crc16|payload<=236]
-    const seq = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
-    const length = data[4] | (data[5] << 8);
-    const crcReceived = data[6] | (data[7] << 8);
-    const payload = data.slice(8, 8 + length);
-    
-    // Check for EOF packet (length=0, crc=0)
-    if (length === 0 && crcReceived === 0) {
-      console.log(`BLE: EOF packet received (seq ${seq})`);
-      this.transferComplete = true;
-      return;
-    }
-    
-    // Validate packet length
-    if (payload.length !== length) {
-      console.warn(`BLE: Payload length mismatch: expected ${length}, got ${payload.length}`);
-      return;
-    }
-    
-    // Verify CRC
-    const crcCalculated = this.crc16_ccitt(payload);
-    if (crcReceived !== crcCalculated) {
-      console.warn(`BLE: CRC error on packet ${seq}: expected ${crcCalculated.toString(16)}, got ${crcReceived.toString(16)}`);
-      // Continue anyway - data might still be usable
-    }
-    
-    // Handle packet ordering
-    if (seq < this.expectedSeq) {
-      // Duplicate or old packet, ignore
-      return;
-    } else if (seq === this.expectedSeq) {
-      // Perfect! This is the next expected packet
-      this.appendData(payload);
+  private processBufferedPackets(): void {
+    while (this.packetBuffer.has(this.expectedSeq)) {
+      const payload = this.packetBuffer.get(this.expectedSeq)!;
+      this.packetBuffer.delete(this.expectedSeq);
+      this.receivedData = this.appendData(this.receivedData, payload);
       this.expectedSeq++;
-      
-      // Process any buffered packets that are now in order
-      while (this.packetBuffer.has(this.expectedSeq)) {
-        const bufferedPayload = this.packetBuffer.get(this.expectedSeq)!;
-        this.packetBuffer.delete(this.expectedSeq);
-        this.appendData(bufferedPayload);
-        this.expectedSeq++;
-      }
-    } else {
-      // Out of order packet - buffer it
-      if (this.packetBuffer.size < 100) { // Limit buffer size
-        this.packetBuffer.set(seq, payload);
-        
-        // Check for large gaps
-        if (seq - this.expectedSeq > 50) {
-          console.warn(`BLE: Large gap detected: expected ${this.expectedSeq}, got ${seq}`);
+    }
+    
+    // Clean up old packets if buffer too large
+    if (this.packetBuffer.size > 100) {
+      const sortedKeys = Array.from(this.packetBuffer.keys()).sort((a, b) => a - b);
+      const cutoff = sortedKeys[sortedKeys.length - 50];
+      for (const [seq] of this.packetBuffer) {
+        if (seq < cutoff) {
+          this.packetBuffer.delete(seq);
         }
       }
     }
   }
 
-  // Append data to received buffer
-  private appendData(payload: Uint8Array): void {
-    const newData = new Uint8Array(this.receivedData.length + payload.length);
-    newData.set(this.receivedData);
-    newData.set(payload, this.receivedData.length);
-    this.receivedData = newData;
+  private appendData(current: Uint8Array, payload: Uint8Array): Uint8Array {
+    const newData = new Uint8Array(current.length + payload.length);
+    newData.set(current);
+    newData.set(payload, current.length);
+    return newData;
   }
 
-  // Download file (port from Python lines 260-346)
+  private async handleNotification(data: Uint8Array): Promise<void> {
+    if (data.length < 8) {
+      return;
+    }
+    
+    // Parse packet exactly like Python
+    const seq = Buffer.from(data.slice(0, 4)).readUInt32LE();
+    const length = Buffer.from(data.slice(4, 6)).readUInt16LE();
+    const crcReceived = Buffer.from(data.slice(6, 8)).readUInt16LE();
+    const payload = data.slice(8, 8 + length);
+    
+    // EOF packet
+    if (length === 0 && crcReceived === 0) {
+      console.log(`\n✓ EOF packet received (seq ${seq}) - transfer complete!`);
+      this.transferComplete = true;
+      return;
+    }
+    
+    if (payload.length !== length) {
+      return;
+    }
+    
+    // Verify CRC but don't reject packet
+    const crcCalculated = this.crc16_ccitt(payload);
+    if (crcReceived !== crcCalculated) {
+      console.log(`\nCRC error on packet ${seq}`);
+    }
+    
+    this.totalPackets++;
+    
+    // Handle ordering exactly like Python
+    if (seq < this.expectedSeq) {
+      return; // Old packet
+    } else if (seq === this.expectedSeq) {
+      this.receivedData = this.appendData(this.receivedData, payload);
+      this.expectedSeq++;
+      this.processBufferedPackets();
+    } else {
+      // Buffer out-of-order packet
+      if (!this.packetBuffer.has(seq)) {
+        this.packetBuffer.set(seq, payload);
+        
+        // Only log and handle large gaps like Python
+        if (seq - this.expectedSeq > 50) {
+          console.log(`\n⚠ Large gap: expected ${this.expectedSeq}, got ${seq}`);
+          const availableSeqs = Array.from(this.packetBuffer.keys())
+            .filter(s => s >= this.expectedSeq)
+            .sort((a, b) => a - b);
+          
+          if (availableSeqs.length > 0) {
+            const nextSeq = availableSeqs[0];
+            if (nextSeq - this.expectedSeq <= 10) {
+              console.log(`  Skipping to packet ${nextSeq}`);
+              this.expectedSeq = nextSeq;
+              this.processBufferedPackets();
+            }
+          }
+        }
+      }
+    }
+    
+    // Send credits exactly like Python - every 2 packets
+    if (this.totalPackets % 2 === 0) {
+      await this.sendCredits(2);
+    }
+  }
+
   async downloadFile(onProgress?: (percent: number) => void): Promise<Uint8Array> {
     if (!this.device) {
       throw new Error('Not connected to device');
     }
 
     console.log('BLE: Starting file download...');
-    let packetCount = 0;
-    let lastProgressUpdate = Date.now();
-    const startTime = Date.now();
     
-    // Stall detection variables
-    let lastReceivedSize = 0;
-    let stallCheckInterval: NodeJS.Timeout;
+    // Reset state
+    this.receivedData = new Uint8Array();
+    this.expectedSeq = 0;
+    this.totalPackets = 0;
+    this.credits = 0;
+    this.transferComplete = false;
+    this.packetBuffer.clear();
+    
+    const startTime = Date.now();
+    let lastReceived = 0;
+    let stallCount = 0;
+    let lastProgress = 0;
     
     return new Promise((resolve, reject) => {
       // Subscribe to notifications
       this.device!.monitorCharacteristicForService(
         this.SERVICE_UUID,
         this.TX_DATA_UUID,
-        (error, characteristic) => {
+        async (error, characteristic) => {
           if (error) {
             console.error('BLE: Notification error:', error);
-            if (stallCheckInterval) clearInterval(stallCheckInterval);
             reject(error);
             return;
           }
           
           if (characteristic?.value) {
-            // Decode base64 data
             const data = Buffer.from(characteristic.value, 'base64');
-            this.processPacket(new Uint8Array(data));
-            packetCount++;
+            await this.handleNotification(new Uint8Array(data));
             
-            // Send credits every 2 packets (increased like Python aggressive mode)
-            if (packetCount % 2 === 0) {
-              this.sendCredits(4).catch(console.error);
-            }
-            
-            // Report progress (throttled)
-            const now = Date.now();
-            if (onProgress && this.fileSize > 0 && (now - lastProgressUpdate > 100)) {
-              const percent = (this.receivedData.length / this.fileSize) * 100;
-              onProgress(Math.min(percent, 100));
-              lastProgressUpdate = now;
-              
-              // Log speed occasionally
-              if (packetCount % 50 === 0) {
-                const elapsed = (now - startTime) / 1000;
-                const speed = this.receivedData.length / elapsed;
-                console.log(`BLE: ${percent.toFixed(1)}% at ${(speed / 1024).toFixed(1)} KB/s`);
-              }
-            }
-            
-            // Check if transfer is complete
-            if (this.transferComplete || this.receivedData.length >= this.fileSize) {
-              if (stallCheckInterval) clearInterval(stallCheckInterval);
-              this.cleanup();
+            // Progress update throttled
+            const progress = (this.receivedData.length / this.fileSize) * 100;
+            if (progress - lastProgress > 0.1) {
               const elapsed = (Date.now() - startTime) / 1000;
               const speed = this.receivedData.length / elapsed;
-              console.log(`BLE: Transfer complete - ${this.receivedData.length} bytes in ${elapsed.toFixed(1)}s (${(speed / 1024).toFixed(1)} KB/s)`);
+              console.log(`\rPacket ${this.expectedSeq}: ${this.receivedData.length}/${this.fileSize} bytes ` +
+                         `(${progress.toFixed(1)}%) - ${(speed/1024).toFixed(1)} KB/s [${this.packetBuffer.size} buffered]`);
+              
+              if (onProgress) onProgress(Math.min(progress, 100));
+              lastProgress = progress;
+            }
+            
+            // Check completion
+            if (this.transferComplete || this.receivedData.length >= this.fileSize) {
+              const elapsed = (Date.now() - startTime) / 1000;
+              const speed = this.receivedData.length / elapsed;
+              console.log(`\n✓ Download complete: ${this.receivedData.length} bytes in ${this.totalPackets} packets`);
+              console.log(`  Average speed: ${(speed/1024).toFixed(1)} KB/s`);
+              console.log(`  Total time: ${elapsed.toFixed(1)} seconds`);
+              if (onProgress) onProgress(100);
               resolve(this.receivedData);
             }
           }
         }
       );
       
-      // Send initial credits to start transfer
-      this.sendCredits(64)
-        .then(() => {
-          console.log('BLE: Initial credits sent');
-          
-          // Start stall detection (like Python script)
-          stallCheckInterval = setInterval(() => {
-            if (this.receivedData.length === lastReceivedSize) {
-              // Transfer stalled - send more credits like Python does
-              console.log(`BLE: Transfer stalled at ${this.receivedData.length} bytes, sending recovery credits...`);
-              this.sendCredits(32).catch(console.error);
-            } else {
-              lastReceivedSize = this.receivedData.length;
+      // Send initial credits and start monitoring
+      this.sendCredits(64).then(() => {
+        console.log('✓ Sent initial credits (64)');
+        
+        // Stall detection exactly like Python
+        const stallCheck = setInterval(async () => {
+          if (this.receivedData.length === lastReceived) {
+            stallCount++;
+            if (stallCount > 20) {
+              const progress = (this.receivedData.length / this.fileSize) * 100;
+              if (progress >= 99.0) {
+                console.log(`\n✓ Transfer nearly complete at ${progress.toFixed(1)}% - accepting as done`);
+                clearInterval(stallCheck);
+                resolve(this.receivedData);
+                return;
+              }
+              
+              console.log(`\n⚠ Transfer stalled at ${this.receivedData.length} bytes (${progress.toFixed(1)}%)`);
+              console.log(`   Buffer contains ${this.packetBuffer.size} out-of-order packets`);
+              
+              await this.sendCredits(32);
+              stallCount = 0;
+              
+              if (this.packetBuffer.size > 0) {
+                const minSeq = Math.min(...Array.from(this.packetBuffer.keys()));
+                if (minSeq - this.expectedSeq <= 10) {
+                  console.log(`   Skipping gap: ${this.expectedSeq} -> ${minSeq}`);
+                  this.expectedSeq = minSeq;
+                  this.processBufferedPackets();
+                }
+              }
             }
-          }, 2000); // Check every 2 seconds like Python (0.5s * 4)
-        })
-        .catch((err) => {
-          console.error('BLE: Failed to send initial credits:', err);
-          if (stallCheckInterval) clearInterval(stallCheckInterval);
-          reject(err);
-        });
-      
-      // Timeout handler
-      setTimeout(() => {
-        if (!this.transferComplete && this.receivedData.length < this.fileSize) {
-          if (stallCheckInterval) clearInterval(stallCheckInterval);
-          
-          // Check if we're making progress
-          if (this.receivedData.length === 0) {
-            this.cleanup();
-            reject(new Error('Transfer timeout - no data received'));
-          } else if (this.receivedData.length >= this.fileSize * 0.99) {
-            // Close enough (99% complete)
-            console.log('BLE: Accepting 99% complete transfer');
-            this.cleanup();
-            resolve(this.receivedData);
+          } else {
+            stallCount = 0;
+            lastReceived = this.receivedData.length;
           }
-        }
-      }, 60000); // 60 second timeout
+        }, 500);
+        
+        // Timeout
+        setTimeout(() => {
+          if (!this.transferComplete && this.receivedData.length < this.fileSize) {
+            clearInterval(stallCheck);
+            if (this.receivedData.length === 0) {
+              reject(new Error('Timeout: No data received'));
+            } else {
+              console.log('Timeout: Accepting partial transfer');
+              resolve(this.receivedData);
+            }
+          }
+        }, 60000);
+      });
     });
   }
 
-  // Disconnect from device
   async disconnect(): Promise<void> {
-    this.cleanup();
-    
     if (this.device) {
       try {
         console.log('BLE: Disconnecting...');
@@ -393,31 +398,21 @@ class BLEFileTransferService {
     }
   }
 
-  // Clean up subscriptions
-  private cleanup(): void {
-    if (this.subscription) {
-      this.subscription.remove();
-      this.subscription = null;
-    }
-  }
-
-  // Reset transfer state
   private reset(): void {
     this.receivedData = new Uint8Array();
     this.expectedSeq = 0;
     this.packetBuffer.clear();
     this.transferComplete = false;
     this.credits = 0;
+    this.totalPackets = 0;
     this.fileSize = 0;
     this.fileName = '';
   }
 
-  // Check if connected
   isConnected(): boolean {
     return this.device !== null;
   }
 
-  // Get current device info
   getDeviceInfo(): { name: string; id: string } | null {
     if (!this.device) return null;
     return {
