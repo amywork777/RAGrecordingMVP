@@ -279,6 +279,10 @@ class BLEFileTransferService {
     let lastProgressUpdate = Date.now();
     const startTime = Date.now();
     
+    // Stall detection variables
+    let lastReceivedSize = 0;
+    let stallCheckInterval: NodeJS.Timeout;
+    
     return new Promise((resolve, reject) => {
       // Subscribe to notifications
       this.device!.monitorCharacteristicForService(
@@ -287,6 +291,7 @@ class BLEFileTransferService {
         (error, characteristic) => {
           if (error) {
             console.error('BLE: Notification error:', error);
+            if (stallCheckInterval) clearInterval(stallCheckInterval);
             reject(error);
             return;
           }
@@ -297,9 +302,9 @@ class BLEFileTransferService {
             this.processPacket(new Uint8Array(data));
             packetCount++;
             
-            // Send credits every 2 packets
+            // Send credits every 2 packets (increased like Python aggressive mode)
             if (packetCount % 2 === 0) {
-              this.sendCredits(2).catch(console.error);
+              this.sendCredits(4).catch(console.error);
             }
             
             // Report progress (throttled)
@@ -319,6 +324,7 @@ class BLEFileTransferService {
             
             // Check if transfer is complete
             if (this.transferComplete || this.receivedData.length >= this.fileSize) {
+              if (stallCheckInterval) clearInterval(stallCheckInterval);
               this.cleanup();
               const elapsed = (Date.now() - startTime) / 1000;
               const speed = this.receivedData.length / elapsed;
@@ -331,15 +337,31 @@ class BLEFileTransferService {
       
       // Send initial credits to start transfer
       this.sendCredits(64)
-        .then(() => console.log('BLE: Initial credits sent'))
+        .then(() => {
+          console.log('BLE: Initial credits sent');
+          
+          // Start stall detection (like Python script)
+          stallCheckInterval = setInterval(() => {
+            if (this.receivedData.length === lastReceivedSize) {
+              // Transfer stalled - send more credits like Python does
+              console.log(`BLE: Transfer stalled at ${this.receivedData.length} bytes, sending recovery credits...`);
+              this.sendCredits(32).catch(console.error);
+            } else {
+              lastReceivedSize = this.receivedData.length;
+            }
+          }, 2000); // Check every 2 seconds like Python (0.5s * 4)
+        })
         .catch((err) => {
           console.error('BLE: Failed to send initial credits:', err);
+          if (stallCheckInterval) clearInterval(stallCheckInterval);
           reject(err);
         });
       
       // Timeout handler
       setTimeout(() => {
         if (!this.transferComplete && this.receivedData.length < this.fileSize) {
+          if (stallCheckInterval) clearInterval(stallCheckInterval);
+          
           // Check if we're making progress
           if (this.receivedData.length === 0) {
             this.cleanup();
