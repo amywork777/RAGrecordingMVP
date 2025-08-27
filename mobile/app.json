@@ -1,9 +1,9 @@
 {
   "expo": {
     "name": "Tai",
-    "slug": "mobile",
+    "slug": "app",
     "scheme": "tai",
-    "owner": "amzyst",
+    "owner": "kylevis",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -52,10 +52,6 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_ADMIN",
-        "android.permission.BLUETOOTH_CONNECT",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.BLUETOOTH",
-        "android.permission.BLUETOOTH_ADMIN",
         "android.permission.BLUETOOTH_CONNECT"
       ],
       "package": "com.taiyaki.tai"
@@ -65,7 +61,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "f02e7531-5571-4df9-86ed-d8ca26837f85"
+        "projectId": "7b9e1923-9f5c-4df9-be7f-a4cb349e59e4"
       }
     }
   }
