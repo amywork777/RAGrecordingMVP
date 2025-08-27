@@ -37,8 +37,11 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSMicrophoneUsageDescription": "This app needs access to the microphone to record audio for transcription.",
+        "NSBluetoothAlwaysUsageDescription": "This app needs Bluetooth access to connect to XIAO recording devices for audio file transfer.",
+        "NSBluetoothPeripheralUsageDescription": "This app needs Bluetooth access to connect to XIAO recording devices for audio file transfer.",
         "UIBackgroundModes": [
-          "audio"
+          "audio",
+          "bluetooth-central"
         ]
       }
     },
