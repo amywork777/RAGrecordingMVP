@@ -18,12 +18,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import BLEService from '../services/BLEService';
+import BLEFileTransferService from '../services/BLEFileTransferService';
 import APIService from '../services/APIService';
 import AudioRecordingService from '../services/AudioRecordingService';
 import DeepLinkService from '../services/DeepLinkService';
 import uuid from 'react-native-uuid';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
+import { Buffer } from 'buffer';
 import { colors, spacing, borderRadius, typography } from '../theme/colors';
 
 const { width } = Dimensions.get('window');
@@ -58,6 +60,13 @@ export default function RecordScreen({ route }: any) {
   const scrollViewRef = useRef<ScrollView>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredTranscripts, setFilteredTranscripts] = useState<Transcript[]>([]);
+  
+  // BLE device states
+  const [availableDevices, setAvailableDevices] = useState<any[]>([]);
+  const [selectedDevice, setSelectedDevice] = useState<any | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState(0);
 
   // Handle deep linking via events
   useEffect(() => {
@@ -527,6 +536,123 @@ export default function RecordScreen({ route }: any) {
     }
   };
 
+  // BLE Functions
+  const scanForDevices = async () => {
+    try {
+      setIsScanning(true);
+      console.log('Starting scan for XIAO-REC devices...');
+      
+      const devices = await BLEFileTransferService.scanForDevices(10000);
+      setAvailableDevices(devices);
+      
+      if (devices.length === 0) {
+        Alert.alert('No devices found', 'Make sure your XIAO device finished recording and is advertising (switch is in LOW position)');
+      } else if (devices.length === 1) {
+        // Auto-select if only one device
+        setSelectedDevice(devices[0]);
+        console.log(`Auto-selected device: ${devices[0].name}`);
+      }
+      
+      console.log(`Found ${devices.length} XIAO-REC devices`);
+    } catch (error) {
+      console.error('Device scan failed:', error);
+      Alert.alert('Scan Failed', 'Failed to scan for devices. Make sure Bluetooth is enabled.');
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const syncFromDevice = async () => {
+    try {
+      if (!selectedDevice) {
+        Alert.alert('No device selected', 'Please scan for devices first and select one');
+        return;
+      }
+      
+      setIsSyncing(true);
+      setSyncProgress(0);
+      console.log(`Syncing from device: ${selectedDevice.name} (${selectedDevice.id})`);
+      
+      // Connect to selected device
+      const connected = await BLEFileTransferService.connect(selectedDevice);
+      if (!connected) {
+        Alert.alert('Connection Failed', 'Could not connect to device. Make sure it is in range and advertising.');
+        return;
+      }
+      
+      console.log('Connected to device, reading file info...');
+      
+      // Get file info
+      const fileInfo = await BLEFileTransferService.readFileInfo();
+      console.log(`File to download: ${fileInfo.name} (${fileInfo.size} bytes)`);
+      
+      // Download file with progress updates
+      const wavData = await BLEFileTransferService.downloadFile((percent) => {
+        setSyncProgress(percent);
+      });
+      
+      console.log(`Downloaded ${wavData.length} bytes`);
+      
+      // Save WAV file to local storage
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const fileName = fileInfo.name || `XIAO_${timestamp}.wav`;
+      const wavUri = FileSystem.documentDirectory + fileName;
+      
+      await FileSystem.writeAsStringAsync(
+        wavUri,
+        Buffer.from(wavData).toString('base64'),
+        { encoding: FileSystem.EncodingType.Base64 }
+      );
+      
+      console.log(`WAV file saved to: ${wavUri}`);
+      
+      // Process through existing transcription pipeline
+      const formData = new FormData();
+      formData.append('audio', {
+        uri: wavUri,
+        name: fileName,
+        type: 'audio/wav'
+      } as any);
+      
+      console.log('Starting transcription...');
+      const result = await APIService.transcribeAudio(formData);
+      
+      // Add to transcripts list
+      const newTranscript: Transcript = {
+        id: uuid.v4() as string,
+        text: result.text || '[No speech detected]',
+        timestamp: new Date(),
+        title: result.aiTitle,
+        summary: result.aiSummary,
+        aiTitle: result.aiTitle,
+        aiSummary: result.aiSummary,
+        durationSeconds: result.durationSeconds,
+        path: result.path,
+      };
+      
+      setTranscripts(prev => [newTranscript, ...prev]);
+      
+      Alert.alert('Success', `File synced and transcribed successfully!\n\n${fileName}\n${wavData.length} bytes`);
+      
+      // Clear selection after successful sync
+      setSelectedDevice(null);
+      setAvailableDevices([]);
+      
+    } catch (error) {
+      console.error('Sync failed:', error);
+      Alert.alert('Sync Failed', `Failed to sync from device: ${error.message}`);
+    } finally {
+      setIsSyncing(false);
+      setSyncProgress(0);
+      // Always disconnect when done
+      try {
+        await BLEFileTransferService.disconnect();
+      } catch (e) {
+        console.error('Disconnect error:', e);
+      }
+    }
+  };
+
   const openReport = async (t: Transcript) => {
     try {
       const dt = t.timestamp;
@@ -652,6 +778,85 @@ export default function RecordScreen({ route }: any) {
               </LinearGradient>
             </TouchableOpacity>
           </View>
+        </View>
+
+        {/* BLE Device Sync Section */}
+        <View style={styles.bleSection}>
+          <Text style={styles.sectionTitle}>Device Sync</Text>
+          
+          {/* Scan Button */}
+          <TouchableOpacity
+            style={[styles.bleButton, styles.scanButton]}
+            onPress={scanForDevices}
+            disabled={isScanning || isSyncing}
+          >
+            <LinearGradient
+              colors={[colors.accent.dark, colors.accent.main]}
+              style={styles.bleGradient}
+            >
+              {isScanning ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="search" size={18} color="#fff" />
+                  <Text style={styles.bleText}>Scan for Devices</Text>
+                </>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+
+          {/* Device List */}
+          {availableDevices.length > 0 && (
+            <View style={styles.deviceList}>
+              <Text style={styles.deviceListTitle}>Available Devices:</Text>
+              {availableDevices.map((device, index) => (
+                <TouchableOpacity
+                  key={device.id || index}
+                  style={[
+                    styles.deviceItem,
+                    selectedDevice?.id === device.id && styles.selectedDevice
+                  ]}
+                  onPress={() => setSelectedDevice(device)}
+                >
+                  <View style={styles.deviceInfo}>
+                    <Text style={styles.deviceName}>{device.name || 'XIAO-REC'}</Text>
+                    <Text style={styles.deviceId}>{device.id}</Text>
+                  </View>
+                  {selectedDevice?.id === device.id && (
+                    <Ionicons name="checkmark-circle" size={24} color={colors.primary.main} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* Sync Button */}
+          <TouchableOpacity
+            style={[
+              styles.bleButton,
+              styles.syncButton,
+              (!selectedDevice || isSyncing) && styles.disabledButton
+            ]}
+            onPress={syncFromDevice}
+            disabled={!selectedDevice || isSyncing}
+          >
+            <LinearGradient
+              colors={[colors.primary.dark, colors.primary.main]}
+              style={styles.bleGradient}
+            >
+              {isSyncing ? (
+                <View style={styles.syncingContent}>
+                  <ActivityIndicator color="#fff" size="small" />
+                  <Text style={styles.bleText}>Syncing {syncProgress.toFixed(0)}%</Text>
+                </View>
+              ) : (
+                <>
+                  <Ionicons name="bluetooth" size={18} color="#fff" />
+                  <Text style={styles.bleText}>Sync from Device</Text>
+                </>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.transcriptsSection}>
@@ -1153,5 +1358,76 @@ const styles = StyleSheet.create({
     color: colors.text.disabled,
     marginTop: spacing.sm,
     textAlign: 'center',
+  },
+  
+  // BLE Styles
+  bleSection: {
+    backgroundColor: colors.surface.primary,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginHorizontal: spacing.md,
+    marginVertical: spacing.sm,
+  },
+  bleButton: {
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    marginVertical: spacing.xs,
+  },
+  bleGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.sm,
+    minHeight: 48,
+  },
+  bleText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: spacing.xs,
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
+  deviceList: {
+    marginVertical: spacing.sm,
+  },
+  deviceListTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginBottom: spacing.xs,
+  },
+  deviceItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surface.secondary,
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    marginVertical: spacing.xs,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  selectedDevice: {
+    borderColor: colors.primary.main,
+    backgroundColor: `${colors.primary.main}10`,
+  },
+  deviceInfo: {
+    flex: 1,
+  },
+  deviceName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  deviceId: {
+    fontSize: 12,
+    color: colors.text.secondary,
+    marginTop: 2,
+  },
+  syncingContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 });

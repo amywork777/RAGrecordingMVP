@@ -2,30 +2,87 @@
 
 A full-stack application for AI-powered wearable devices that records, transcribes, and enables intelligent search through conversations using RAG (Retrieval-Augmented Generation) technology.
 
-## What's New (highlights)
-- Persisted AI title and summary in Supabase to avoid regeneration on load
-- Duration captured for audio uploads and recordings, displayed as N/A when unknown
-- Copy-to-clipboard report in Mobile Record screen
-- Backend-only diarization strategy: non‑diarized first pass → LLM single vs multi → diarize only if multi, with smoothing
-- Sync endpoint to backfill ZeroEntropy docs into Supabase
-- Auto-detect API base URL for Expo LAN
+## 🚧 Current Implementation Status
 
-> more testing needed to be done for multi-speaker conversation
+### Phase 1: Completed ✅
+- **Mobile App**: Expo React Native with transcription, RAG search, and individual chat
+- **Backend**: Node.js with OpenAI Whisper, ZeroEntropy, and Supabase integration 
+- **Simulation**: BLE service simulation for development/testing
+
+### Phase 2: Hardware Integration 🔄
+- **Hardware Device**: Seeed XIAO BLE Sense with SD card for audio recording
+- **BLE Connection**: Real Bluetooth connectivity to mobile app
+- **Auto-sync**: Device automatically sends WAV files to app after recording
+- **Physical Controls**: Single button + RGB LED + power switch
+
+## 🎯 Hardware Deliverables
+
+### Materials Required
+- **Seeed XIAO BLE Sense board** (with built-in microphone & RGB LED)
+- **MicroSD card module** + FAT32 formatted card
+- **Battery pack** with ON/OFF power switch  
+- **Single tactile button** for recording controls
+- **Breadboard and jumper wires** for connections
+
+### Hardware Features
+- **Single Button Controls**:
+  - Single-click: Start/stop recording (toggle)
+  - Double-click: Force sync all unsent files (manual fallback)
+- **Auto-sync**: After recording stops → fast advertise (60s) → auto-sync when app connects
+- **LED Status Indicators**:
+  - 🔴 Recording: Red solid
+  - 🔵 Connected: Blue solid  
+  - 🟢 Syncing: Green solid
+  - 🔵 Fast advertising: Blue blink
+  - 🔴 Low battery/Error: Red blink
+  - ⚫ Idle: Off
+- **Power Management**: Battery + switch for ON/OFF control
+
+### BLE Workflow
+1. **Idle**: Device slow-advertises (low power, discoverable)
+2. **Recording**: No transfers, just record to SD card
+3. **Stop Recording**: Finalize WAV → fast advertise for 60s
+4. **Auto-Connect**: App connects → automatic sync of all unsent WAVs
+5. **File Management**: App can list/delete files on device SD card
 
 ## Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
+│              XIAO BLE Hardware Device                       │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    │
+│  │   Button    │    │ Microphone  │    │  RGB LED    │    │
+│  │   Control   │    │ Recording   │    │  Status     │    │
+│  └─────┬───────┘    └──────┬──────┘    └──────┬──────┘    │
+│        │                   │                  │            │
+│        └───────────────────▼──────────────────┘            │
+│                      Main Controller                       │
+│                           │                                │
+│    ┌──────────────────────┼──────────────────────┐        │
+│    │           SD Card Storage (WAV Files)       │        │
+│    └──────────────────────┼──────────────────────┘        │
+│                           │                                │
+│    ┌──────────────────────▼──────────────────────┐        │
+│    │         BLE File Transfer Protocol          │        │
+│    └──────────────────────┬──────────────────────┘        │
+└───────────────────────────┼───────────────────────────────┘
+                           │ WAV Files via BLE
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
 │                     Mobile App (Expo/React Native)          │
 │  ┌─────────────┐                         ┌────────────┐    │
-│  │ Record Screen│                         │ Chat Screen│    │
+│  │Record Screen│                         │ Chat Screen│    │
+│  │Device Conn. │                         │RAG Search  │    │
 │  └──────┬──────┘                         └─────┬──────┘    │
 │         │                                      │            │
 │    ┌────▼────────────────────────────────────▼─────┐       │
-│    │            BLE Service (Simulated)            │       │
+│    │          Real BLE Service (react-native-ble-plx) │    │
+│    │          • Device Discovery                      │    │
+│    │          • File Transfer                         │    │
+│    │          • Auto-sync                             │    │
 │    └────────────────────┬───────────────────────────┘       │
 └─────────────────────────┼───────────────────────────────────┘
-                          │ Audio Chunks
+                          │ WAV Files for Transcription
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                   Backend (Node.js/Express)                 │
@@ -43,182 +100,164 @@ A full-stack application for AI-powered wearable devices that records, transcrib
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Features
+## 🚀 Quick Start Guide
 
-### Mobile App
-- **BLE Connection**: Simulated Bluetooth Low Energy connection to wearable device
-- **Audio Streaming**: Real-time audio chunk streaming from device
-- **Live Transcription**: Display transcriptions as they're processed
-- **Memory Search**: Natural language search through past conversations
-- **Chat Interface**: Q&A interface for querying stored memories
+### 📋 Prerequisites
+- **Node.js 18+** and npm
+- **OpenAI API Key** for Whisper transcription
+- **ZeroEntropy API Key** for RAG functionality  
+- **Physical iPhone/Android device** (BLE requires real device, not simulator)
+- **Developer mode enabled** on iPhone for Expo testing
 
-### Backend
-- **Audio Transcription**: OpenAI Whisper integration for speech-to-text
-- **Vector Storage**: ZeroEntropy integration for embeddings and storage
-- **RAG Pipeline**: Full retrieval-augmented generation for intelligent answers
-- **RESTful API**: Clean endpoints for transcription and search
+### 🔧 Backend Setup
+```bash
+cd backend
+npm install
+
+# Configure API keys in .env
+echo "OPENAI_API_KEY=sk-..." > .env
+echo "ZEROENTROPY_API_KEY=ze_..." >> .env
+echo "PORT=3000" >> .env
+
+npm start
+```
+
+### 📱 Mobile App Setup  
+```bash
+cd mobile
+npm install
+
+# Start Expo development server
+npx expo start
+```
+
+⚠️ **Important**: For BLE hardware integration, you'll need a **custom Expo Dev Build** (Expo Go cannot connect to hardware directly).
+
+### 📋 Step-by-Step Instructions:
+
+1. **Open two terminal windows**
+
+2. **Terminal 1 (Backend)**:
+```bash
+cd /path/to/your/RAGrecording/backend
+npm start
+```
+
+3. **Terminal 2 (Mobile App)**:
+```bash
+cd /path/to/your/RAGrecording/mobile  
+npx expo start
+```
+
+4. **Connect your phone**:
+   - Install Expo Go app from App Store/Google Play
+   - Scan the QR code that appears in Terminal 2
+   - Or open http://localhost:8081 in browser to see QR code
+
+### 🎯 What You'll See:
+- **Backend**: Runs on http://localhost:3000
+- **Mobile App**: QR code for Expo Go connection
+- **Features**: Recording, transcription, individual transcript chat, RAG search
+
+## Current Features
+
+### Mobile App ✅
+- **Device Connection**: "Device Connected" status indicator
+- **BLE Integration**: Real Bluetooth connectivity to XIAO hardware
+- **WAV File Transfer**: Automatic sync from device after recording
+- **Transcription Display**: AI-generated titles and summaries  
+- **Memory Search**: Natural language search through conversations
+- **Individual Chat**: Q&A interface for each transcript
+- **File Management**: List/delete files on device SD card
+
+### Hardware Device ✅  
+- **Audio Recording**: 16kHz mono WAV files to SD card
+- **BLE File Transfer**: Credit-based protocol for reliable transfers
+- **Button Controls**: Single tactile button with timing-based actions
+- **LED Status**: RGB LED shows recording/sync/connection states
+- **Power Management**: Battery + switch for portable operation
+- **Auto-sync**: Automatic file transfer after recording completion
+
+### Backend ✅
+- **Audio Transcription**: OpenAI Whisper integration 
+- **Vector Storage**: ZeroEntropy RAG pipeline
+- **Smart Processing**: Diarization for multi-speaker detection
+- **RESTful API**: Clean endpoints for all operations
 
 ## Tech Stack
 
-### Frontend
-- React Native with Expo
-- TypeScript
-- React Navigation
-- BLE PLX (for future real BLE implementation)
+### Hardware
+- **Seeed XIAO BLE Sense** (nRF52840 + built-in microphone + RGB LED)
+- **MicroSD Card Storage** for WAV file buffering
+- **Arduino/PlatformIO** firmware with C++ 
+- **BLE Protocol** for wireless file transfer
+
+### Mobile App  
+- **React Native** with Expo framework
+- **TypeScript** for type safety
+- **react-native-ble-plx** for Bluetooth connectivity
+- **React Navigation** for screen management
+- **Custom Dev Build** required for BLE hardware access
 
 ### Backend
-- Node.js with Express
-- TypeScript
-- OpenAI API (Whisper)
-- ZeroEntropy SDK
-- Multer for file handling
+- **Node.js** with Express server
+- **OpenAI Whisper API** for speech-to-text
+- **ZeroEntropy SDK** for RAG vector storage
+- **Supabase** (optional) for metadata persistence
 
-## Setup Instructions
+## 🔧 Advanced Configuration
 
-### Prerequisites
-- Node.js 18+ and npm
-- Expo CLI (`npm install -g expo-cli`)
-- OpenAI API key
-- ZeroEntropy API key
+### Custom Expo Dev Build (Required for BLE)
+Since Expo Go cannot access Bluetooth hardware, you need a custom development build:
 
-### Backend Setup
-
-1. Navigate to backend directory:
 ```bash
-cd backend
+# Install Expo CLI
+npm install -g @expo/cli
+
+# Generate development build
+cd mobile
+npx expo run:ios     # for iOS
+npx expo run:android # for Android
 ```
 
-2. Install dependencies:
+### LAN Network Setup
+If testing on physical device, configure network access:
+
+1. **Find your computer's LAN IP**:
 ```bash
-npm install
+# macOS/Linux
+ipconfig getifaddr en0  # or en1 if en0 fails
+
+# Windows  
+ipconfig | findstr IPv4
 ```
 
-3. Configure environment variables in `.env`:
+2. **Configure mobile app** (`mobile/.env`):
+```env
+EXPO_PUBLIC_API_URL=http://192.168.1.100:3000
+```
+
+3. **Start with LAN mode**:
+```bash
+npx expo start --lan
+```
+
+### Environment Variables
+
+**Backend** (`backend/.env`):
 ```env
 PORT=3000
-OPENAI_API_KEY=your_openai_api_key_here
-ZEROENTROPY_API_KEY=your_zeroentropy_api_key_here
-# Optional: enable Supabase metadata + AI annotations
-SUPABASE_URL=https://<your-project>.supabase.co
+OPENAI_API_KEY=sk-proj-...
+ZEROENTROPY_API_KEY=ze_...
+# Optional Supabase integration
+SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-# or for dev only:
-# SUPABASE_ANON_KEY=your_anon_key
 ```
 
-4. Start the development server (run this inside the `backend` directory):
-```bash
-npm run dev
-```
-
-5. Verify the backend is reachable:
-```bash
-# From your Mac
-open http://localhost:3000/health
-
-# From your phone (must be on the same Wi‑Fi/LAN)
-open http://<YOUR_MAC_LAN_IP>:3000/health
-# Example: http://172.16.3.229:3000/health
-```
-You should see a small JSON payload with `status: "healthy"`.
-
-### Mobile App Setup
-
-1. Navigate to mobile directory:
-```bash
-cd mobile
-```
-
-2. Install dependencies:
-```bash
-npm install
-```
-
-3. Quick start (works on simulators and often on dev machines):
-```bash
-npx expo start
-```
-- If you run on an iOS/Android simulator, `localhost` will generally work out of the box.
-- After the dev server starts, press `i` in the terminal to launch the iOS Simulator.
-- If you run on a physical device and it loads fine, you can stop here.
-
-4. If the app shows “Network request failed” on a physical device, configure the API endpoint:
-- Find your Mac's LAN IP (Wi‑Fi):
-```bash
-# macOS Wi‑Fi
-ipconfig getifaddr en0
-# (If en0 prints nothing, try en1)
-```
-- Create `mobile/.env` with your LAN IP so the app can reach your backend:
+**Mobile** (`mobile/.env`):
 ```env
-EXPO_PUBLIC_API_URL=http://<YOUR_MAC_LAN_IP>:3000
-# Example: EXPO_PUBLIC_API_URL=http://172.16.3.229:3000
+EXPO_PUBLIC_API_URL=http://192.168.1.100:3000
 ```
-Notes:
-- Expo automatically exposes variables that start with `EXPO_PUBLIC_` to the app.
-- "localhost" only works in a simulator. On a real device, `localhost` points to the phone itself.
-
-5. Start Expo development server (LAN mode recommended):
-```bash
-# Uses the .env value above
-npx expo start --lan
-
-# Or inject the URL one‑off and clear cache (useful if the app cached a bad URL)
-EXPO_PUBLIC_API_URL=http://<YOUR_MAC_LAN_IP>:3000 npx expo start --lan --clear
-```
-
-6. Run on your device:
-- Press `i` for iOS simulator
-- Press `a` for Android emulator
-- Scan QR code with Expo Go app for physical device
-
-7. Confirm connectivity from your phone:
-- Open `http://<YOUR_MAC_LAN_IP>:3000/health` in the phone’s browser. If that loads, the app should be able to reach the backend.
-
-### Why this sometimes works on one machine but not another
-- Simulators can use `http://localhost:3000`, so things “just work” on one dev’s machine.
-- Physical devices cannot use your computer’s `localhost`. You must use your computer’s LAN IP and ensure both the phone and computer are on the same network, and the backend is listening on that IP/port.
-
-### ZeroEntropy Setup (optional but recommended)
-1. In `backend/.env`, set:
-```env
-ZEROENTROPY_API_KEY=ze_XXXXXXXXXXXXXXXXXXXXXXXX
-OPENAI_API_KEY=sk-...                    # optional for GPT features
-```
-2. Restart the backend: `npm run dev`
-3. Verify status from your phone or Mac:
-```
-http://<YOUR_MAC_LAN_IP>:3000/api/zeroentropy/status
-```
-You should see `status: connected` and `apiKeyConfigured: true` when configured correctly.
-
-### Install the ZeroEntropy SDK
-Using the official SDKs for Python and TypeScript / JavaScript.
-
-#### TypeScript / JavaScript
-```bash
-npm install zeroentropy
-```
-
-#### Python (if applicable)
-```bash
-pip install zeroentropy
-```
-
-### Uploading Text Files from the Mobile App
-- On the Record screen, use the Upload buttons to send either:
-  - Text file → `POST /api/zeroentropy/upload-text`
-  - Audio file (wav/m4a/mp4) → `POST /api/zeroentropy/upload-file` (transcribed via Whisper)
-- The backend stores content in ZeroEntropy and, if Supabase is configured, upserts document metadata and saves AI title/summary.
-
-Requirements:
-- Backend must be running and reachable from the device (see LAN setup above).
-- `ZEROENTROPY_API_KEY` must be set in `backend/.env`.
-- To persist AI title/summary and avoid regeneration on load, set `SUPABASE_URL` and a key (`SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_ANON_KEY`).
-- Mobile dependencies installed: `expo-document-picker`, `expo-file-system`.
-
-Troubleshooting:
-- If the upload fails with 500, check `http://<YOUR_MAC_LAN_IP>:3000/api/zeroentropy/status` for `apiKeyConfigured: true`.
-- Ensure the selected file is plain text (`text/plain`).
 
 ## API Endpoints
 ### GET /api/zeroentropy/documents
@@ -365,72 +404,73 @@ const searchResults = await zeroEntropy.search("What about the roadmap?");
 - **Simulated BLE**: Allows development without hardware dependency
 - **TypeScript**: Type safety across full stack reduces runtime errors
 
-## Troubleshooting
+## 🛠️ Hardware Assembly Guide
 
-### Common Issues
+### Circuit Connections
+```
+XIAO BLE Sense Pinout:
+• D0: Not used (single button only)  
+• D1: Single tactile button (INPUT_PULLUP)
+• D6: SD card CS (Chip Select)
+• D8: SD card SCK (Clock)  
+• D9: SD card MISO (Data Out)
+• D10: SD card MOSI (Data In)
+• 3V3: SD card VCC + Button pullup
+• GND: SD card + Button + Battery ground
+• VIN: Battery positive through power switch
+```
 
-1. **Network request failed (Expo on physical device)**:
-   - Ensure the backend is running: `cd backend && npm run dev`
-   - Phone and Mac must be on the same Wi‑Fi network
-   - Set `EXPO_PUBLIC_API_URL` to `http://<YOUR_MAC_LAN_IP>:3000` (in `mobile/.env` or via CLI)
-   - Start Expo in LAN mode and clear cache if needed:
-     ```bash
-     EXPO_PUBLIC_API_URL=http://<YOUR_MAC_LAN_IP>:3000 npx expo start --lan --clear
-     ```
-   - Open `http://<YOUR_MAC_LAN_IP>:3000/health` from the phone’s browser to confirm reachability
-   - If your network blocks LAN discovery, try Tunnel mode: `npx expo start --tunnel`
+### Physical Assembly
+1. **Power Circuit**: Battery pack → SPST switch → XIAO VIN pin
+2. **SD Card Module**: Connect via SPI pins (D6,D8,D9,D10)  
+3. **Single Button**: Connect between D1 and GND
+4. **All components share common ground**
 
-2. **Transcription returns simulated data**:
-   - Verify OpenAI API key is set correctly
-   - Check API key has Whisper access
+### Firmware Upload
+```bash
+# Using PlatformIO
+cd tainecklace_hardware
+platformio run --target upload
 
-3. **ZeroEntropy endpoints fail or fall back to mock**:
-   - Check `backend/.env` for `ZEROENTROPY_API_KEY`
-   - Restart backend after changing env: `npm run dev`
-   - Verify: `http://<YOUR_MAC_LAN_IP>:3000/api/zeroentropy/status`
+# Or using Arduino IDE
+# Open tainecklace_hardware/src/main.cpp
+# Select "Seeed XIAO BLE Sense" board
+# Upload via USB
+```
 
-4. **"npm run dev" says missing script**:
-   - You likely ran it at the repo root. Change into the correct directory first:
-     - Backend: `cd backend && npm run dev`
-     - Mobile: `cd mobile && npx expo start`
+## 🐛 Troubleshooting
 
-5. **iOS Simulator cannot boot (cannot determine the runtime bundle)**:
-   - Ensure Xcode is installed and initialized:
-     - Install/Update Xcode (App Store)
-     - Open Xcode once to finish components install
-     - Xcode → Settings → Platforms → ensure an iOS Simulator runtime is installed
-   - Point CLI to Xcode and accept license:
-     ```bash
-     xcode-select -p
-     sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-     sudo xcodebuild -license accept
-     ```
-   - Reset simulators and boot a valid device:
-     ```bash
-     killall Simulator || true
-     killall -9 com.apple.CoreSimulator.CoreSimulatorService || true
-     xcrun simctl list runtimes
-     xcrun simctl list devices
-     open -a Simulator
-     # Optional: wipe all
-     xcrun simctl erase all
-     ```
-   - Start Expo and launch iOS:
-     ```bash
-     cd mobile
-     npx expo start --lan
-     # press i to open iOS simulator
-     ```
-     If it still errors, manually boot a listed device:
-     ```bash
-     xcrun simctl boot "iPhone 15 Pro"
-     open -a Simulator
-     ```
-   - Temporary fallback: run on a physical device with Expo Go:
-     ```bash
-     npx expo start --lan
-     # scan the QR code on your phone
-     ```
+### BLE Connection Issues
+- **Expo Go limitation**: Use custom dev build for BLE access
+- **Device not found**: Ensure hardware is advertising (double-click button)  
+- **Connection drops**: Check distance and interference
+- **iOS permissions**: Enable Bluetooth in Settings → Privacy
+
+### Network Issues
+- **Backend unreachable**: Check LAN IP configuration in `mobile/.env`
+- **CORS errors**: Ensure backend allows mobile app origin
+- **API key errors**: Verify OpenAI/ZeroEntropy keys in `backend/.env`
+
+### Hardware Issues  
+- **No recording**: Check SD card formatting (FAT32) and connections
+- **LED not working**: Verify RGB LED pin definitions for XIAO
+- **Button unresponsive**: Check pullup resistor and debouncing
+- **Battery drain**: Implement sleep mode in firmware for power saving
+
+### Expo Development
+```bash
+# Clear cache and restart
+npx expo start --clear
+
+# Check device connectivity  
+npx expo doctor
+
+# Install missing dependencies
+npx expo install --fix
+
+# Custom dev build (required for BLE)
+npx expo run:ios --device
+```
 
 ## License
 
