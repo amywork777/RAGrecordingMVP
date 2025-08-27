@@ -235,6 +235,33 @@ class APIService {
     return response.json();
   }
 
+  async transcribeAudio(formData: FormData): Promise<any> {
+    console.log('APIService: Transcribing audio file via FormData');
+    
+    const response = await fetch(`${API_BASE_URL}/api/transcribe`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Transcription failed:', errorText);
+      throw new Error(`Transcription failed: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('Transcription result:', result);
+    
+    // Transform backend response to match expected format
+    return {
+      text: result.transcription || result.text || '[No speech detected]',
+      aiTitle: result.title,
+      aiSummary: result.summary,
+      durationSeconds: result.durationSeconds,
+      path: result.recordingId,
+    };
+  }
+
   async chatWithTranscription(transcriptionId: string, message: string): Promise<{ answer: string; transcriptionId: string; metadata: any }> {
     const response = await fetch(`${API_BASE_URL}/api/chat/transcription`, {
       method: 'POST',

@@ -19,3 +19,4 @@ coverage/
 .cache/
 temp/
 uploads/
+.BLE_PROTOCOL.md

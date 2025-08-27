@@ -60,7 +60,7 @@ class BLEFileTransferService {
       }, timeout);
 
       this.manager.startDeviceScan(
-        [this.SERVICE_UUID], // Look for our service UUID
+        null, // Scan for ALL devices, no UUID filter
         { allowDuplicates: false },
         (error, device) => {
           if (error) {
@@ -72,13 +72,25 @@ class BLEFileTransferService {
           }
 
           if (device) {
+            // Debug: log all discovered devices
+            console.log(`BLE: Discovered device: ${device.name || 'Unknown'} (${device.id})`);
+            
             // Look for "XIAO-REC" device name or devices with our service
             if (device.name === 'XIAO-REC' || 
                 device.name?.includes('XIAO') || 
                 device.name?.includes('REC')) {
               
               if (!deviceMap.has(device.id)) {
-                console.log(`BLE: Found device: ${device.name} (${device.id})`);
+                console.log(`BLE: ✓ Found XIAO device: ${device.name} (${device.id})`);
+                deviceMap.set(device.id, device);
+                devices.push(device);
+              }
+            }
+            
+            // Also check service UUIDs as fallback (like Python version)
+            if (device.serviceUUIDs && device.serviceUUIDs.includes(this.SERVICE_UUID)) {
+              if (!deviceMap.has(device.id)) {
+                console.log(`BLE: ✓ Found device with matching service UUID: ${device.name || 'Unknown'} (${device.id})`);
                 deviceMap.set(device.id, device);
                 devices.push(device);
               }
@@ -127,6 +139,9 @@ class BLEFileTransferService {
       );
       
       // Decode base64 data
+      if (!characteristic.value) {
+        throw new Error('No data received from file info characteristic');
+      }
       const data = Buffer.from(characteristic.value, 'base64');
       
       // Parse [u32 size][name (null-terminated)]
@@ -311,9 +326,6 @@ class BLEFileTransferService {
               resolve(this.receivedData);
             }
           }
-        },
-        (subscription) => {
-          this.subscription = subscription;
         }
       );
       

@@ -562,25 +562,57 @@ export default function RecordScreen({ route }: any) {
     }
   };
 
-  const syncFromDevice = async () => {
+  const autoSyncFromDevice = async () => {
     try {
-      if (!selectedDevice) {
-        Alert.alert('No device selected', 'Please scan for devices first and select one');
-        return;
-      }
-      
-      setIsSyncing(true);
+      setIsScanning(true);
+      setIsSyncing(false);
       setSyncProgress(0);
-      console.log(`Syncing from device: ${selectedDevice.name} (${selectedDevice.id})`);
+      console.log('Auto-sync: Starting scan for XIAO devices...');
       
-      // Connect to selected device
-      const connected = await BLEFileTransferService.connect(selectedDevice);
-      if (!connected) {
-        Alert.alert('Connection Failed', 'Could not connect to device. Make sure it is in range and advertising.');
+      // Scan for devices
+      const devices = await BLEFileTransferService.scanForDevices(10000); // 10 second scan
+      setAvailableDevices(devices);
+      
+      if (devices.length === 0) {
+        Alert.alert(
+          'No XIAO Device Found', 
+          'Make sure your XIAO device finished recording and switch is in LOW position to start advertising.'
+        );
         return;
       }
       
-      console.log('Connected to device, reading file info...');
+      // Auto-select first XIAO device found
+      const xiaoDevice = devices[0];
+      setSelectedDevice(xiaoDevice);
+      console.log(`Auto-sync: Found ${devices.length} devices, connecting to: ${xiaoDevice.name} (${xiaoDevice.id})`);
+      
+      // Immediately start syncing
+      setIsScanning(false);
+      setIsSyncing(true);
+      
+      await performSync(xiaoDevice);
+      
+    } catch (error) {
+      console.error('Auto-sync failed:', error);
+      Alert.alert('Auto-Sync Failed', `Failed to sync: ${error.message}`);
+    } finally {
+      setIsScanning(false);
+      setIsSyncing(false);
+      setSyncProgress(0);
+    }
+  };
+
+  const performSync = async (device: any) => {
+    console.log(`Syncing from device: ${device.name} (${device.id})`);
+    
+    // Connect to device
+    const connected = await BLEFileTransferService.connect(device);
+    if (!connected) {
+      Alert.alert('Connection Failed', 'Could not connect to device. Make sure it is in range and advertising.');
+      return;
+    }
+    
+    console.log('Connected to device, reading file info...');
       
       // Get file info
       const fileInfo = await BLEFileTransferService.readFileInfo();
@@ -780,83 +812,47 @@ export default function RecordScreen({ route }: any) {
           </View>
         </View>
 
-        {/* BLE Device Sync Section */}
+        {/* BLE Auto-Sync Section */}
         <View style={styles.bleSection}>
           <Text style={styles.sectionTitle}>Device Sync</Text>
+          <Text style={styles.sectionSubtitle}>
+            Switch your XIAO device to LOW position after recording to auto-advertise
+          </Text>
           
-          {/* Scan Button */}
+          {/* Auto-Sync Button */}
           <TouchableOpacity
-            style={[styles.bleButton, styles.scanButton]}
-            onPress={scanForDevices}
+            style={[styles.bleButton, styles.syncButton]}
+            onPress={autoSyncFromDevice}
             disabled={isScanning || isSyncing}
-          >
-            <LinearGradient
-              colors={[colors.secondary.dark, colors.secondary.main]}
-              style={styles.bleGradient}
-            >
-              {isScanning ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="search" size={18} color="#fff" />
-                  <Text style={styles.bleText}>Scan for Devices</Text>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
-
-          {/* Device List */}
-          {availableDevices.length > 0 && (
-            <View style={styles.deviceList}>
-              <Text style={styles.deviceListTitle}>Available Devices:</Text>
-              {availableDevices.map((device, index) => (
-                <TouchableOpacity
-                  key={device.id || index}
-                  style={[
-                    styles.deviceItem,
-                    selectedDevice?.id === device.id && styles.selectedDevice
-                  ]}
-                  onPress={() => setSelectedDevice(device)}
-                >
-                  <View style={styles.deviceInfo}>
-                    <Text style={styles.deviceName}>{device.name || 'XIAO-REC'}</Text>
-                    <Text style={styles.deviceId}>{device.id}</Text>
-                  </View>
-                  {selectedDevice?.id === device.id && (
-                    <Ionicons name="checkmark-circle" size={24} color={colors.primary.main} />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-
-          {/* Sync Button */}
-          <TouchableOpacity
-            style={[
-              styles.bleButton,
-              styles.syncButton,
-              (!selectedDevice || isSyncing) && styles.disabledButton
-            ]}
-            onPress={syncFromDevice}
-            disabled={!selectedDevice || isSyncing}
           >
             <LinearGradient
               colors={[colors.primary.dark, colors.primary.main]}
               style={styles.bleGradient}
             >
-              {isSyncing ? (
+              {isScanning || isSyncing ? (
                 <View style={styles.syncingContent}>
                   <ActivityIndicator color="#fff" size="small" />
-                  <Text style={styles.bleText}>Syncing {syncProgress.toFixed(0)}%</Text>
+                  <Text style={styles.bleText}>
+                    {isScanning ? 'Scanning...' : `Syncing ${syncProgress.toFixed(0)}%`}
+                  </Text>
                 </View>
               ) : (
                 <>
                   <Ionicons name="bluetooth" size={18} color="#fff" />
-                  <Text style={styles.bleText}>Sync from Device</Text>
+                  <Text style={styles.bleText}>Auto-Sync from XIAO</Text>
                 </>
               )}
             </LinearGradient>
           </TouchableOpacity>
+
+          {/* Show found device info during sync */}
+          {selectedDevice && (isSyncing || isScanning) && (
+            <View style={styles.deviceInfo}>
+              <Text style={styles.deviceInfoText}>
+                📱 Connected to: {selectedDevice.name || 'XIAO-REC'}
+              </Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.transcriptsSection}>
@@ -1156,6 +1152,12 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
     color: colors.text.primary,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    marginBottom: spacing.md,
+    lineHeight: 20,
   },
   refreshButton: {
     padding: 8,
