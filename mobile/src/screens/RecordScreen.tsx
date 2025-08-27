@@ -791,7 +791,7 @@ export default function RecordScreen({ route }: any) {
             disabled={isScanning || isSyncing}
           >
             <LinearGradient
-              colors={[colors.accent.dark, colors.accent.main]}
+              colors={[colors.secondary.dark, colors.secondary.main]}
               style={styles.bleGradient}
             >
               {isScanning ? (
