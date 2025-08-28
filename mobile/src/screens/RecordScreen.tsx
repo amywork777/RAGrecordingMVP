@@ -12,6 +12,7 @@ import {
   Dimensions,
   TextInput,
   AppState,
+  Switch,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -25,10 +26,16 @@ import DeepLinkService from '../services/DeepLinkService';
 import uuid from 'react-native-uuid';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
+import * as SecureStore from 'expo-secure-store';
 import { Buffer } from 'buffer';
 import { useTheme, spacing, borderRadius, typography, shadows } from '../theme/colors';
 
 const { width } = Dimensions.get('window');
+
+// Auto-scan configuration
+const AUTO_SCAN_STORAGE_KEY = 'auto_scan_enabled';
+const AUTO_SCAN_INTERVAL_MS = 30000; // 30 seconds
+const AUTO_SCAN_TIMEOUT_MS = 8000; // 8 seconds scan duration
 
 interface Transcript {
   id: string;
@@ -73,6 +80,13 @@ export default function RecordScreen({ route }: any) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState(0);
   const [showUploadOptions, setShowUploadOptions] = useState(false);
+  
+  // Auto-scanning states
+  const [autoScanEnabled, setAutoScanEnabled] = useState(false);
+  const [isAutoScanning, setIsAutoScanning] = useState(false);
+  const [lastAutoScanTime, setLastAutoScanTime] = useState<Date | null>(null);
+  const [autoScanInterval, setAutoScanInterval] = useState<NodeJS.Timeout | null>(null);
+  const [appState, setAppState] = useState(AppState.currentState);
 
   // Handle deep linking via events
   useEffect(() => {
@@ -137,6 +151,49 @@ export default function RecordScreen({ route }: any) {
       if (intervalId) clearInterval(intervalId);
     };
   }, [currentRecordingId]);
+
+  // Load auto-scan preference from storage
+  useEffect(() => {
+    loadAutoScanPreference();
+  }, []);
+
+  // Handle app state changes for smart scanning
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: string) => {
+      console.log('App state changed:', appState, '->', nextAppState);
+      setAppState(nextAppState);
+      
+      if (nextAppState === 'active' && autoScanEnabled) {
+        // App became active and auto-scan is enabled, start scanning
+        console.log('App became active, starting auto-scan');
+        startAutoScan();
+      } else if (nextAppState !== 'active') {
+        // App went to background/inactive, stop auto-scanning
+        console.log('App went to background, stopping auto-scan');
+        stopAutoScan();
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription?.remove();
+  }, [autoScanEnabled, appState]);
+
+  // Manage auto-scan interval
+  useEffect(() => {
+    if (autoScanEnabled && appState === 'active' && !isScanning && !isSyncing) {
+      console.log('Starting auto-scan interval');
+      startAutoScan();
+    } else {
+      console.log('Stopping auto-scan interval');
+      stopAutoScan();
+    }
+
+    return () => {
+      if (autoScanInterval) {
+        clearInterval(autoScanInterval);
+      }
+    };
+  }, [autoScanEnabled, appState, isScanning, isSyncing]);
 
   // Handle navigation from Chat screen
   useEffect(() => {
@@ -779,6 +836,170 @@ export default function RecordScreen({ route }: any) {
     }
   };
 
+  // Auto-scan functions
+  const loadAutoScanPreference = async () => {
+    try {
+      const storedValue = await SecureStore.getItemAsync(AUTO_SCAN_STORAGE_KEY);
+      if (storedValue !== null) {
+        const enabled = JSON.parse(storedValue);
+        setAutoScanEnabled(enabled);
+        console.log('Loaded auto-scan preference:', enabled);
+      }
+    } catch (error) {
+      console.error('Failed to load auto-scan preference:', error);
+    }
+  };
+
+  const saveAutoScanPreference = async (enabled: boolean) => {
+    try {
+      await SecureStore.setItemAsync(AUTO_SCAN_STORAGE_KEY, JSON.stringify(enabled));
+      console.log('Saved auto-scan preference:', enabled);
+    } catch (error) {
+      console.error('Failed to save auto-scan preference:', error);
+    }
+  };
+
+  const toggleAutoScan = async (enabled: boolean) => {
+    setAutoScanEnabled(enabled);
+    await saveAutoScanPreference(enabled);
+    
+    if (enabled && appState === 'active') {
+      console.log('Auto-scan enabled, starting...');
+      startAutoScan();
+    } else {
+      console.log('Auto-scan disabled, stopping...');
+      stopAutoScan();
+    }
+  };
+
+  const startAutoScan = () => {
+    if (autoScanInterval || isScanning || isSyncing) {
+      console.log('Auto-scan already running or manual operations in progress');
+      return;
+    }
+
+    console.log('Starting auto-scan with', AUTO_SCAN_INTERVAL_MS / 1000, 'second intervals');
+    
+    // Run initial scan immediately
+    performAutoScan();
+    
+    // Set up recurring scans
+    const interval = setInterval(() => {
+      performAutoScan();
+    }, AUTO_SCAN_INTERVAL_MS);
+    
+    setAutoScanInterval(interval);
+  };
+
+  const stopAutoScan = () => {
+    if (autoScanInterval) {
+      console.log('Stopping auto-scan interval');
+      clearInterval(autoScanInterval);
+      setAutoScanInterval(null);
+    }
+    setIsAutoScanning(false);
+  };
+
+  const performAutoScan = async () => {
+    // Don't auto-scan if manual operations are in progress
+    if (isScanning || isSyncing || isRecording) {
+      console.log('Skipping auto-scan: manual operations in progress');
+      return;
+    }
+
+    // Don't auto-scan if app is not in foreground
+    if (appState !== 'active') {
+      console.log('Skipping auto-scan: app not in foreground');
+      return;
+    }
+
+    try {
+      console.log('Performing auto-scan...');
+      setIsAutoScanning(true);
+      setLastAutoScanTime(new Date());
+      
+      // Scan with shorter timeout for battery efficiency
+      const devices = await BLEFileTransferService.scanForDevices(AUTO_SCAN_TIMEOUT_MS);
+      
+      if (devices.length > 0) {
+        console.log(`Auto-scan found ${devices.length} devices:`, devices.map(d => d.name));
+        
+        // Auto-connect to first device found
+        const xiaoDevice = devices[0];
+        setSelectedDevice(xiaoDevice);
+        setAvailableDevices(devices);
+        
+        // Stop auto-scanning and start sync
+        stopAutoScan();
+        setIsAutoScanning(false);
+        
+        // Show alert and auto-sync
+        Alert.alert(
+          'XIAO Device Found!',
+          `Found "${xiaoDevice.name}". Auto-syncing now...`,
+          [
+            {
+              text: 'Cancel',
+              style: 'cancel',
+              onPress: () => {
+                setSelectedDevice(null);
+                setAvailableDevices([]);
+                // Resume auto-scanning after user cancels
+                if (autoScanEnabled && appState === 'active') {
+                  setTimeout(startAutoScan, 5000); // Resume after 5 seconds
+                }
+              }
+            },
+            {
+              text: 'Sync',
+              onPress: () => {
+                performSyncFromAutoScan(xiaoDevice);
+              }
+            }
+          ]
+        );
+      } else {
+        console.log('Auto-scan: no devices found');
+      }
+    } catch (error) {
+      console.error('Auto-scan failed:', error);
+    } finally {
+      setIsAutoScanning(false);
+    }
+  };
+
+  const performSyncFromAutoScan = async (device: any) => {
+    try {
+      setIsSyncing(true);
+      await performSync(device);
+      
+      // Clear device selection after sync
+      setSelectedDevice(null);
+      setAvailableDevices([]);
+      
+      // Resume auto-scanning after successful sync (with delay)
+      if (autoScanEnabled && appState === 'active') {
+        setTimeout(() => {
+          console.log('Resuming auto-scan after successful sync');
+          startAutoScan();
+        }, 10000); // Wait 10 seconds before resuming
+      }
+    } catch (error) {
+      console.error('Auto-sync failed:', error);
+      Alert.alert('Auto-Sync Failed', `Failed to sync: ${error.message}`);
+      
+      // Resume auto-scanning after failed sync
+      if (autoScanEnabled && appState === 'active') {
+        setTimeout(() => {
+          console.log('Resuming auto-scan after failed sync');
+          startAutoScan();
+        }, 5000); // Wait 5 seconds before resuming
+      }
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const openReport = async (t: Transcript) => {
     try {
       const dt = t.timestamp;
@@ -860,107 +1081,94 @@ export default function RecordScreen({ route }: any) {
             {isRecording ? 'Tap to stop' : 'Tap to record'}
           </Text>
 
-          {/* Upload and Sync Buttons */}
+          {/* Action Buttons Row */}
           <View style={styles.actionButtonsContainer}>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => setShowUploadOptions(!showUploadOptions)}
-            >
-              <LinearGradient
-                colors={[colors.primary.dark, colors.primary.main]}
-                style={styles.actionButtonGradient}
-              >
-                <Ionicons name="cloud-upload" size={12} color="#fff" />
-                <Text style={styles.actionButtonText}>Upload</Text>
-                <Ionicons 
-                  name={showUploadOptions ? "chevron-up" : "chevron-down"} 
-                  size={10} 
-                  color="#fff" 
+            {/* Bluetooth Section */}
+            <View style={styles.actionSection}>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="bluetooth" size={14} color={colors.primary.main} />
+                <Text style={styles.deviceUploadTitle}>Device</Text>
+                <Switch
+                  value={autoScanEnabled}
+                  onValueChange={toggleAutoScan}
+                  trackColor={{ false: colors.surface.border, true: `${colors.primary.main}40` }}
+                  thumbColor={autoScanEnabled ? colors.primary.main : colors.text.disabled}
+                  ios_backgroundColor={colors.surface.border}
+                  style={styles.switch}
                 />
-              </LinearGradient>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={autoSyncFromDevice}
-              disabled={isScanning || isSyncing}
-            >
-              <LinearGradient
-                colors={[colors.primary.dark, colors.primary.main]}
-                style={styles.actionButtonGradient}
-              >
-                {isScanning || isSyncing ? (
-                  <>
-                    <ActivityIndicator color="#fff" size="small" />
-                    <Text style={styles.actionButtonText}>
-                      {isScanning ? 'Scanning' : `${syncProgress.toFixed(0)}%`}
-                    </Text>
-                  </>
-                ) : (
-                  <>
-                    <Ionicons name="bluetooth" size={12} color="#fff" />
-                    <Text style={styles.actionButtonText}>Sync</Text>
-                  </>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-
-          {/* Upload Options (shown when Upload is expanded) */}
-          {showUploadOptions && (
-            <View style={styles.uploadOptionsContainer}>
+              </View>
+              
               <TouchableOpacity
-                style={styles.uploadOptionButton}
-                onPress={handleUploadText}
-                disabled={isUploading}
+                style={styles.actionButton}
+                onPress={autoSyncFromDevice}
+                disabled={isScanning || isSyncing}
               >
                 <LinearGradient
-                  colors={[colors.primary.light, colors.primary.main]}
-                  style={styles.uploadOptionGradient}
+                  colors={[colors.primary.main, colors.primary.dark]}
+                  style={styles.actionButtonGradient}
                 >
-                  {isUploading ? (
-                    <ActivityIndicator color="#fff" size="small" />
+                  {isScanning || isSyncing ? (
+                    <>
+                      <ActivityIndicator color="#fff" size="small" />
+                      <Text style={styles.actionButtonText}>
+                        {isScanning ? 'Scanning' : `${syncProgress.toFixed(0)}%`}
+                      </Text>
+                    </>
                   ) : (
                     <>
-                      <Ionicons name="document-text" size={10} color="#fff" />
-                      <Text style={styles.uploadOptionText}>Text</Text>
+                      <Ionicons name="sync" size={12} color="#fff" />
+                      <Text style={styles.actionButtonText}>Sync</Text>
                     </>
                   )}
                 </LinearGradient>
               </TouchableOpacity>
 
+              {autoScanEnabled && (
+                <Text style={styles.statusText}>
+                  {isAutoScanning ? 'Auto-scanning...' : 'Auto enabled'}
+                </Text>
+              )}
+            </View>
+
+            {/* Upload Section */}
+            <View style={styles.actionSection}>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="cloud-upload" size={14} color={colors.primary.main} />
+                <Text style={styles.deviceUploadTitle}>Upload</Text>
+              </View>
+              
               <TouchableOpacity
-                style={styles.uploadOptionButton}
-                onPress={handleUploadAudio}
-                disabled={isUploadingAudio}
+                style={styles.actionButton}
+                onPress={() => setShowUploadOptions(!showUploadOptions)}
               >
                 <LinearGradient
                   colors={[colors.primary.light, colors.primary.main]}
-                  style={styles.uploadOptionGradient}
+                  style={styles.actionButtonGradient}
                 >
-                  {isUploadingAudio ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <>
-                      <Ionicons name="musical-notes" size={10} color="#fff" />
-                      <Text style={styles.uploadOptionText}>Audio</Text>
-                    </>
-                  )}
+                  <Text style={styles.actionButtonText}>File Type</Text>
+                  <Ionicons 
+                    name={showUploadOptions ? "chevron-up" : "chevron-down"} 
+                    size={10} 
+                    color="#fff" 
+                  />
                 </LinearGradient>
               </TouchableOpacity>
             </View>
-          )}
+
+          </View>
         </View>
 
         <View style={styles.transcriptsSection}>
           <View style={styles.transcriptsHeader}>
             <Text style={styles.sectionTitle}>Recent Transcripts</Text>
-            <TouchableOpacity
-              style={styles.refreshButton}
-              onPress={loadTranscriptsFromBackend}
-            >
-              <Ionicons name="refresh" size={18} color={colors.primary.main} />
-            </TouchableOpacity>
+            <View style={styles.headerControls}>
+              <TouchableOpacity
+                style={styles.refreshButton}
+                onPress={loadTranscriptsFromBackend}
+              >
+                <Ionicons name="refresh" size={18} color={colors.primary.main} />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Search Bar */}
@@ -986,6 +1194,7 @@ export default function RecordScreen({ route }: any) {
               </Text>
             )}
           </View>
+
 
           <ScrollView 
             ref={scrollViewRef}
@@ -1131,6 +1340,33 @@ export default function RecordScreen({ route }: any) {
         </View>
       </LinearGradient>
 
+      {/* Upload Options Dropdown - positioned at screen level */}
+      {showUploadOptions && (
+        <View style={styles.screenDropdownContainer}>
+          <TouchableOpacity
+            style={styles.dropdownOption}
+            onPress={handleUploadText}
+            disabled={isUploading}
+          >
+            <Ionicons name="document-text" size={12} color={colors.primary.main} />
+            <Text style={styles.dropdownOptionText}>Text File</Text>
+            {isUploading && <ActivityIndicator size="small" color={colors.primary.main} />}
+          </TouchableOpacity>
+
+          <View style={styles.dropdownSeparator} />
+
+          <TouchableOpacity
+            style={styles.dropdownOption}
+            onPress={handleUploadAudio}
+            disabled={isUploadingAudio}
+          >
+            <Ionicons name="musical-notes" size={12} color={colors.primary.main} />
+            <Text style={styles.dropdownOptionText}>Audio File</Text>
+            {isUploadingAudio && <ActivityIndicator size="small" color={colors.primary.main} />}
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Modal removed; full report shown inline on expand */}
     </SafeAreaView>
   );
@@ -1214,14 +1450,28 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   actionButtonsContainer: {
     flexDirection: 'row',
-    marginTop: spacing.xs,
+    marginTop: spacing.md,
+    marginHorizontal: spacing.lg,
+    gap: spacing.sm,
+  },
+  actionSection: {
+    flex: 1,
+    backgroundColor: colors.background.card,
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.surface.border,
+    position: 'relative',
+    justifyContent: 'space-between',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    marginBottom: spacing.xs,
     gap: spacing.xs,
+    height: 24, // Fixed height to ensure alignment
   },
   actionButton: {
-    flex: 1,
-    maxWidth: 90,
     borderRadius: borderRadius.md,
     overflow: 'hidden',
     ...shadows.inset,
@@ -1238,36 +1488,60 @@ const createStyles = (colors: any) => StyleSheet.create({
   actionButtonText: {
     ...typography.caption,
     color: '#fff',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
   },
-  uploadOptionsContainer: {
-    flexDirection: 'row',
-    marginTop: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-  },
-  uploadOptionButton: {
-    flex: 1,
-    maxWidth: 80,
-    borderRadius: borderRadius.sm,
-    overflow: 'hidden',
-  },
-  uploadOptionGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    gap: 1,
-    minHeight: 22,
-  },
-  uploadOptionText: {
-    color: '#fff',
-    fontWeight: '600',
+  statusText: {
+    ...typography.caption,
+    color: colors.text.secondary,
     fontSize: 9,
-    fontFamily: 'General Sans',
+    textAlign: 'center',
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
+  dropdownContainer: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 2,
+    backgroundColor: colors.background.primary,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.surface.border,
+    ...shadows.card,
+    zIndex: 9999,
+    elevation: 10,
+  },
+  screenDropdownContainer: {
+    position: 'absolute',
+    top: 320, // Positioned right below the File Type button
+    left: '52%', // Positioned under the right side (upload section)  
+    width: 100, // Same width as the File Type button
+    backgroundColor: colors.background.primary,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.surface.border,
+    ...shadows.card,
+    zIndex: 10000,
+    elevation: 15,
+  },
+  dropdownOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    gap: spacing.xs,
+  },
+  dropdownOptionText: {
+    ...typography.caption,
+    color: colors.text.primary,
+    fontSize: 11,
+    flex: 1,
+  },
+  dropdownSeparator: {
+    height: 1,
+    backgroundColor: colors.surface.border,
   },
   transcriptsSection: {
     flex: 1,
@@ -1279,10 +1553,58 @@ const createStyles = (colors: any) => StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.md,
   },
+  headerControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  autoScanToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.xs,
+    backgroundColor: `${colors.background.elevated}80`,
+    borderRadius: borderRadius.sm,
+  },
+  autoScanIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  autoScanSpinner: {
+    marginLeft: 2,
+  },
+  switch: {
+    transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }],
+  },
+  autoScanStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    backgroundColor: `${colors.background.elevated}60`,
+    borderRadius: borderRadius.sm,
+    marginBottom: spacing.sm,
+  },
+  autoScanStatusText: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
   sectionTitle: {
     ...typography.h2,
     color: colors.text.primary,
     marginBottom: spacing.xs,
+  },
+  deviceUploadTitle: {
+    ...typography.caption,
+    color: colors.text.primary,
+    fontSize: 9,
+    fontWeight: '600',
+    flex: 1,
   },
   sectionSubtitle: {
     ...typography.caption,
@@ -1528,4 +1850,5 @@ const createStyles = (colors: any) => StyleSheet.create({
     borderRadius: borderRadius.sm,
     backgroundColor: `${colors.text.secondary}10`,
   },
+
 }); // End of createStyles function
