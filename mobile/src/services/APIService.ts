@@ -4,18 +4,14 @@ import { Platform } from 'react-native';
 function deriveDefaultBaseUrl(): string {
   // Production backend URL for all non-development cases
   const PRODUCTION_URL = 'https://backend-iy3pj7fnq-amy-zhous-projects-45e75853.vercel.app';
+  const LOCAL_URL = 'http://localhost:3000';
   
   // 1) Respect explicit config if provided
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
   }
 
-  // 2) Always use production URL for standalone builds (TestFlight/App Store)
-  if (Constants.executionEnvironment === 'standalone') {
-    return PRODUCTION_URL;
-  }
-
-  // 3) Try to infer host from Expo (works in Expo Go and dev builds)
+  // 2) Try to infer host from Expo (works in Expo Go and dev builds)
   try {
     const anyConstants: any = Constants as any;
     const hostUri: string | undefined =
@@ -28,18 +24,25 @@ function deriveDefaultBaseUrl(): string {
     }
   } catch {}
 
-  // 4) Check if we're in a release/production environment even if not detected as standalone
-  if (__DEV__ === false || Constants.appOwnership === 'standalone') {
+  // 3) For development builds, try production first with fallback to local
+  if (Constants.executionEnvironment === 'storeClient' || 
+      (Constants.executionEnvironment === 'standalone' && Constants.appOwnership !== 'expo')) {
+    // This is a production build (TestFlight/App Store)
     return PRODUCTION_URL;
   }
 
-  // 5) Platform-specific dev fallbacks (only for development)
-  if (Platform.OS === 'android') {
-    // Android emulator special alias for host-loopback
-    return 'http://10.0.2.2:3000';
+  // 4) For development builds and Expo Go, prefer local if available, fallback to production
+  const isDevelopment = __DEV__ || 
+                       Constants.executionEnvironment !== 'standalone' || 
+                       Constants.appOwnership === 'expo';
+  
+  if (isDevelopment) {
+    // In development, we'll try local first in the API calls with fallback
+    return LOCAL_URL;
   }
-  // iOS simulator / generic fallback for development
-  return 'http://localhost:3000';
+
+  // 5) Default fallback to production
+  return PRODUCTION_URL;
 }
 
 const API_BASE_URL = deriveDefaultBaseUrl();
@@ -52,6 +55,38 @@ console.log('Execution environment:', Constants.executionEnvironment);
 console.log('App ownership:', Constants.appOwnership);
 // eslint-disable-next-line no-console
 console.log('__DEV__:', __DEV__);
+
+// Fallback URL helper
+async function fetchWithFallback(url: string, options: RequestInit): Promise<Response> {
+  const PRODUCTION_URL = 'https://backend-iy3pj7fnq-amy-zhous-projects-45e75853.vercel.app';
+  const LOCAL_URL = 'http://localhost:3000';
+  
+  try {
+    console.log(`Trying primary URL: ${url}`);
+    const response = await fetch(url, options);
+    if (response.ok) return response;
+    throw new Error(`HTTP ${response.status}`);
+  } catch (error) {
+    console.log(`Primary URL failed: ${error.message}`);
+    
+    // Try fallback URL if different from primary
+    const primaryBaseUrl = url.split('/api')[0];
+    let fallbackUrl;
+    
+    if (primaryBaseUrl.includes('localhost')) {
+      fallbackUrl = url.replace(LOCAL_URL, PRODUCTION_URL);
+    } else {
+      fallbackUrl = url.replace(PRODUCTION_URL, LOCAL_URL);
+    }
+    
+    if (fallbackUrl !== url) {
+      console.log(`Trying fallback URL: ${fallbackUrl}`);
+      return await fetch(fallbackUrl, options);
+    }
+    
+    throw error;
+  }
+}
 
 interface TranscriptionResponse {
   transcription: string;
@@ -106,7 +141,7 @@ class APIService {
     formData.append('recordingId', recordingId);
 
     console.log('Making fetch request...');
-    const response = await fetch(`${API_BASE_URL}/api/transcribe`, {
+    const response = await fetchWithFallback(`${API_BASE_URL}/api/transcribe`, {
       method: 'POST',
       body: formData,
     });
@@ -257,7 +292,7 @@ class APIService {
   async transcribeAudio(formData: FormData): Promise<any> {
     console.log('APIService: Transcribing audio file via FormData');
     
-    const response = await fetch(`${API_BASE_URL}/api/transcribe`, {
+    const response = await fetchWithFallback(`${API_BASE_URL}/api/transcribe`, {
       method: 'POST',
       body: formData,
     });
