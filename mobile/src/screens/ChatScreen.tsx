@@ -495,6 +495,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     fontSize: 16,
+    fontFamily: 'General Sans',
     color: colors.text.primary,
     maxHeight: 100,
   },

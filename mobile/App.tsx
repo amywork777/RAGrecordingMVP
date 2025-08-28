@@ -32,11 +32,11 @@ function MainTabs() {
 
           return (
             <View style={{
-              padding: 4,
-              borderRadius: 12,
+              padding: 2,
+              borderRadius: 8,
               backgroundColor: focused ? `${colors.primary.main}15` : 'transparent',
             }}>
-              <Ionicons name={iconName} size={28} color={color} />
+              <Ionicons name={iconName} size={22} color={color} />
             </View>
           );
         },
@@ -58,6 +58,7 @@ function MainTabs() {
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: '600',
+          fontFamily: 'General Sans',
           marginTop: 4,
         },
       })}

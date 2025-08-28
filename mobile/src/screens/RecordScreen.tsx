@@ -907,7 +907,7 @@ export default function RecordScreen({ route }: any) {
         <View style={styles.bleSection}>
           <Text style={styles.sectionTitle}>Device Sync</Text>
           <Text style={styles.sectionSubtitle}>
-            Switch your XIAO device to LOW position after recording to auto-advertise
+            Switch XIAO to LOW position after recording
           </Text>
           
           {/* Auto-Sync Button */}
@@ -1149,6 +1149,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: '700',
+    fontFamily: 'General Sans',
     color: colors.text.primary,
   },
   recordingBadge: {
@@ -1170,6 +1171,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
     fontSize: 13,
+    fontFamily: 'General Sans',
   },
   recordContainer: {
     alignItems: 'center',
@@ -1228,6 +1230,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
     fontSize: 13,
+    fontFamily: 'General Sans',
   },
   transcriptsSection: {
     flex: 1,
@@ -1242,10 +1245,12 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: '600',
+    fontFamily: 'General Sans',
     color: colors.text.primary,
   },
   sectionSubtitle: {
     fontSize: 14,
+    fontFamily: 'General Sans',
     color: colors.text.secondary,
     marginBottom: spacing.md,
     lineHeight: 20,
@@ -1271,10 +1276,12 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 14,
+    fontFamily: 'General Sans',
     color: colors.text.primary,
   },
   searchResults: {
     fontSize: 12,
+    fontFamily: 'General Sans',
     color: colors.text.secondary,
     marginTop: spacing.xs,
     marginLeft: spacing.sm,
@@ -1324,11 +1331,13 @@ const styles = StyleSheet.create({
   transcriptTitle: {
     fontSize: 16,
     fontWeight: '600',
+    fontFamily: 'General Sans',
     color: colors.text.primary,
     marginBottom: 2,
   },
   transcriptSummary: {
     fontSize: 14,
+    fontFamily: 'General Sans',
     color: colors.text.secondary,
     marginTop: spacing.sm,
     lineHeight: 20,
@@ -1342,6 +1351,7 @@ const styles = StyleSheet.create({
   aiTitle: {
     fontSize: 16,
     fontWeight: '700',
+    fontFamily: 'General Sans',
     color: colors.text.primary,
     marginBottom: 4,
   },
@@ -1363,6 +1373,7 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 18,
     fontWeight: '600',
+    fontFamily: 'General Sans',
     color: colors.text.secondary,
     marginTop: spacing.md,
   },
@@ -1456,27 +1467,29 @@ const styles = StyleSheet.create({
   // BLE Styles
   bleSection: {
     backgroundColor: colors.surface.primary,
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    marginHorizontal: spacing.md,
-    marginVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginVertical: spacing.xs,
   },
   bleButton: {
-    borderRadius: borderRadius.lg,
+    borderRadius: borderRadius.md,
     overflow: 'hidden',
-    marginVertical: spacing.xs,
+    marginVertical: 4,
   },
   bleGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: spacing.sm,
-    minHeight: 48,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    minHeight: 36,
   },
   bleText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
+    fontFamily: 'General Sans',
     marginLeft: spacing.xs,
   },
   disabledButton: {

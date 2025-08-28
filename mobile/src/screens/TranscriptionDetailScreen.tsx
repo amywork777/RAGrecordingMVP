@@ -518,6 +518,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     fontSize: 14,
+    fontFamily: 'General Sans',
     color: colors.text.primary,
   },
   chatSendButton: {

@@ -54,33 +54,40 @@ export const borderRadius = {
 };
 
 export const typography = {
+  fontFamily: 'General Sans',
   h1: {
     fontSize: 32,
     fontWeight: '700' as const,
+    fontFamily: 'General Sans',
     letterSpacing: -0.5,
   },
   h2: {
     fontSize: 24,
     fontWeight: '600' as const,
+    fontFamily: 'General Sans',
     letterSpacing: -0.3,
   },
   h3: {
     fontSize: 20,
     fontWeight: '600' as const,
+    fontFamily: 'General Sans',
   },
   body: {
     fontSize: 16,
     fontWeight: '400' as const,
+    fontFamily: 'General Sans',
     lineHeight: 24,
   },
   caption: {
     fontSize: 14,
     fontWeight: '400' as const,
+    fontFamily: 'General Sans',
     lineHeight: 20,
   },
   button: {
     fontSize: 16,
     fontWeight: '600' as const,
+    fontFamily: 'General Sans',
     letterSpacing: 0.5,
   },
 };
