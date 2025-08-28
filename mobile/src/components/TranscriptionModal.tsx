@@ -18,7 +18,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import APIService from '../services/APIService';
-import { colors, spacing, borderRadius, typography } from '../theme/colors';
+import { useTheme, spacing, borderRadius, typography } from '../theme/colors';
 
 const { height: screenHeight } = Dimensions.get('window');
 
@@ -44,6 +44,8 @@ interface ChatMessage {
 }
 
 export default function TranscriptionModal({ visible, onClose, transcription }: TranscriptionModalProps) {
+  const colors = useTheme();
+  const styles = createStyles(colors);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -423,7 +425,7 @@ export default function TranscriptionModal({ visible, onClose, transcription }: 
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: any) => StyleSheet.create({
   backdrop: {
     position: 'absolute',
     top: 0,
@@ -664,4 +666,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-});
+}); // End of createStyles function

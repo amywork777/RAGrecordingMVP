@@ -16,7 +16,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import APIService from '../services/APIService';
-import { colors, spacing, borderRadius, typography } from '../theme/colors';
+import { useTheme, spacing, borderRadius, typography } from '../theme/colors';
 
 interface TranscriptionDetailProps {
   route: {
@@ -43,6 +43,8 @@ interface ChatMessage {
 }
 
 export default function TranscriptionDetailScreen({ route, navigation }: TranscriptionDetailProps) {
+  const colors = useTheme();
+  const styles = createStyles(colors);
   const { transcription } = route.params;
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
@@ -249,10 +251,6 @@ export default function TranscriptionDetailScreen({ route, navigation }: Transcr
                     <Text style={styles.metadataText}>{transcription.topic}</Text>
                   </View>
                 )}
-                <View style={styles.metadataRow}>
-                  <Ionicons name="document-text-outline" size={16} color={colors.text.secondary} />
-                  <Text style={styles.metadataText}>ID: {transcription.recordingId}</Text>
-                </View>
               </View>
 
               {/* Full Transcription */}
@@ -332,7 +330,7 @@ export default function TranscriptionDetailScreen({ route, navigation }: Transcr
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.primary,
@@ -534,4 +532,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-});
+}); // End of createStyles function

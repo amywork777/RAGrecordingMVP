@@ -26,7 +26,7 @@ import uuid from 'react-native-uuid';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { Buffer } from 'buffer';
-import { colors, spacing, borderRadius, typography } from '../theme/colors';
+import { useTheme, spacing, borderRadius, typography, shadows } from '../theme/colors';
 
 const { width } = Dimensions.get('window');
 
@@ -48,6 +48,8 @@ interface Transcript {
 }
 
 export default function RecordScreen({ route }: any) {
+  const colors = useTheme();
+  const styles = createStyles(colors);
   const navigation = useNavigation();
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -70,6 +72,7 @@ export default function RecordScreen({ route }: any) {
   const [isScanning, setIsScanning] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState(0);
+  const [showUploadOptions, setShowUploadOptions] = useState(false);
 
   // Handle deep linking via events
   useEffect(() => {
@@ -857,94 +860,97 @@ export default function RecordScreen({ route }: any) {
             {isRecording ? 'Tap to stop' : 'Tap to record'}
           </Text>
 
-          {/* Upload Buttons Container */}
-          <View style={styles.uploadButtonsContainer}>
-            {/* Upload Text Button */}
+          {/* Compact Upload Section */}
+          <View style={styles.uploadSection}>
             <TouchableOpacity
-              style={styles.uploadButton}
-              onPress={handleUploadText}
-              disabled={isUploading}
+              style={styles.uploadToggle}
+              onPress={() => setShowUploadOptions(!showUploadOptions)}
             >
               <LinearGradient
-                colors={[colors.secondary.dark, colors.secondary.main]}
-                style={styles.uploadGradient}
+                colors={[colors.accent.gradient1, colors.accent.gradient2]}
+                style={styles.uploadToggleGradient}
               >
-                {isUploading ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <>
-                    <Ionicons name="document-text" size={18} color="#fff" />
-                    <Text style={styles.uploadText}>Text File</Text>
-                  </>
-                )}
+                <Ionicons name="cloud-upload" size={16} color="#fff" />
+                <Text style={styles.uploadToggleText}>Upload Files</Text>
+                <Ionicons 
+                  name={showUploadOptions ? "chevron-up" : "chevron-down"} 
+                  size={16} 
+                  color="#fff" 
+                />
               </LinearGradient>
             </TouchableOpacity>
 
-            {/* Upload WAV Button */}
-            <TouchableOpacity
-              style={styles.uploadButton}
-              onPress={handleUploadAudio}
-              disabled={isUploadingAudio}
-            >
-              <LinearGradient
-                colors={[colors.primary.dark, colors.primary.main]}
-                style={styles.uploadGradient}
-              >
-                {isUploadingAudio ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <>
-                    <Ionicons name="musical-notes" size={18} color="#fff" />
-                    <Text style={styles.uploadText}>Audio File</Text>
-                  </>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
+            {showUploadOptions && (
+              <View style={styles.uploadOptionsContainer}>
+                <TouchableOpacity
+                  style={styles.uploadOptionButton}
+                  onPress={handleUploadText}
+                  disabled={isUploading}
+                >
+                  <LinearGradient
+                    colors={[colors.secondary.dark, colors.secondary.main]}
+                    style={styles.uploadOptionGradient}
+                  >
+                    {isUploading ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <>
+                        <Ionicons name="document-text" size={16} color="#fff" />
+                        <Text style={styles.uploadOptionText}>Text File</Text>
+                      </>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.uploadOptionButton}
+                  onPress={handleUploadAudio}
+                  disabled={isUploadingAudio}
+                >
+                  <LinearGradient
+                    colors={[colors.primary.dark, colors.primary.main]}
+                    style={styles.uploadOptionGradient}
+                  >
+                    {isUploadingAudio ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <>
+                        <Ionicons name="musical-notes" size={16} color="#fff" />
+                        <Text style={styles.uploadOptionText}>Audio File</Text>
+                      </>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
 
-        {/* BLE Auto-Sync Section */}
-        <View style={styles.bleSection}>
-          <Text style={styles.sectionTitle}>Device Sync</Text>
-          <Text style={styles.sectionSubtitle}>
-            Switch XIAO to LOW position after recording
-          </Text>
-          
-          {/* Auto-Sync Button */}
+          {/* Compact Device Sync Chip */}
           <TouchableOpacity
-            style={[styles.bleButton, styles.syncButton]}
+            style={styles.deviceSyncChip}
             onPress={autoSyncFromDevice}
             disabled={isScanning || isSyncing}
           >
             <LinearGradient
-              colors={[colors.primary.dark, colors.primary.main]}
-              style={styles.bleGradient}
+              colors={[colors.secondary.dark, colors.secondary.main]}
+              style={styles.deviceSyncGradient}
             >
               {isScanning || isSyncing ? (
-                <View style={styles.syncingContent}>
+                <>
                   <ActivityIndicator color="#fff" size="small" />
-                  <Text style={styles.bleText}>
-                    {isScanning ? 'Scanning...' : `Syncing ${syncProgress.toFixed(0)}%`}
+                  <Text style={styles.deviceSyncText}>
+                    {isScanning ? 'Scanning' : `${syncProgress.toFixed(0)}%`}
                   </Text>
-                </View>
+                </>
               ) : (
                 <>
-                  <Ionicons name="bluetooth" size={18} color="#fff" />
-                  <Text style={styles.bleText}>Auto-Sync from XIAO</Text>
+                  <Ionicons name="bluetooth" size={12} color="#fff" />
+                  <Text style={styles.deviceSyncText}>XIAO Sync</Text>
                 </>
               )}
             </LinearGradient>
           </TouchableOpacity>
-
-          {/* Show found device info during sync */}
-          {selectedDevice && (isSyncing || isScanning) && (
-            <View style={styles.deviceInfo}>
-              <Text style={styles.deviceInfoText}>
-                📱 Connected to: {selectedDevice.name || 'XIAO-REC'}
-              </Text>
-            </View>
-          )}
-        </View>
 
         <View style={styles.transcriptsSection}>
           <View style={styles.transcriptsHeader}>
@@ -1041,23 +1047,10 @@ export default function RecordScreen({ route }: any) {
                           </Text>
                         </View>
                       </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View style={styles.actionsContainer}>
+                        {/* Primary Chat Action */}
                         <TouchableOpacity
-                          style={styles.iconButton}
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            toggleExpand(transcript.id);
-                          }}
-                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        >
-                          <Ionicons 
-                            name={transcript.isExpanded ? "eye-off-outline" : "eye-outline"} 
-                            size={16} 
-                            color={colors.text.secondary} 
-                          />
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.iconButton}
+                          style={styles.primaryChatButton}
                           onPress={(e) => {
                             e.stopPropagation();
                             const transcriptionData = {
@@ -1073,28 +1066,38 @@ export default function RecordScreen({ route }: any) {
                           }}
                           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         >
-                          <Ionicons name="chatbubbles-outline" size={16} color={colors.secondary.main} />
+                          <LinearGradient
+                            colors={[colors.primary.main, colors.secondary.main]}
+                            style={styles.primaryChatGradient}
+                          >
+                            <Ionicons name="chatbubbles" size={20} color="#fff" />
+                            <Text style={styles.primaryChatText}>Chat</Text>
+                          </LinearGradient>
                         </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.iconButton}
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            copyReport(transcript);
-                          }}
-                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        >
-                          <Ionicons name="copy-outline" size={16} color={colors.primary.main} />
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.deleteButton}
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            deleteTranscript(transcript);
-                          }}
-                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        >
-                          <Ionicons name="trash-outline" size={16} color={colors.accent.error} />
-                        </TouchableOpacity>
+                        
+                        {/* Secondary Actions */}
+                        <View style={styles.secondaryActions}>
+                          <TouchableOpacity
+                            style={styles.secondaryActionButton}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              copyReport(transcript);
+                            }}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Ionicons name="copy-outline" size={14} color={colors.text.secondary} />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.secondaryActionButton}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              deleteTranscript(transcript);
+                            }}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Ionicons name="trash-outline" size={14} color={colors.accent.error} />
+                          </TouchableOpacity>
+                        </View>
                       </View>
                     </View>
                     {/* Show AI title + summary collapsed; full report when expanded */}
@@ -1130,7 +1133,7 @@ export default function RecordScreen({ route }: any) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.primary,
@@ -1139,17 +1142,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xl,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   title: {
-    fontSize: 28,
-    fontWeight: '700',
-    fontFamily: 'General Sans',
+    ...typography.h1,
     color: colors.text.primary,
   },
   recordingBadge: {
@@ -1157,21 +1158,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.accent.error,
     paddingHorizontal: spacing.md,
-    paddingVertical: 6,
+    paddingVertical: spacing.xs,
     borderRadius: borderRadius.full,
+    ...shadows.button,
+    shadowColor: colors.accent.error,
   },
   recordingDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: '#fff',
     marginRight: spacing.xs,
   },
   recordingTime: {
+    ...typography.micro,
     color: '#fff',
-    fontWeight: '600',
-    fontSize: 13,
-    fontFamily: 'General Sans',
+    textTransform: 'none',
   },
   recordContainer: {
     alignItems: 'center',
@@ -1202,34 +1204,57 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
   },
   recordHint: {
-    marginTop: spacing.md,
-    ...typography.body,
+    marginTop: spacing.lg,
+    ...typography.bodySecondary,
     color: colors.text.secondary,
-    fontSize: 14,
+    textAlign: 'center',
   },
-  uploadButtonsContainer: {
-    flexDirection: 'row',
-    marginTop: spacing.xl,
-    gap: spacing.md,
-    justifyContent: 'center',
+  uploadSection: {
+    marginTop: spacing.md,
+    alignItems: 'center',
   },
-  uploadButton: {
-    flex: 1,
-    maxWidth: 140,
+  uploadToggle: {
+    borderRadius: borderRadius.xl,
+    overflow: 'hidden',
+    ...shadows.inset,
   },
-  uploadGradient: {
+  uploadToggleGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: 12,
-    borderRadius: borderRadius.xl,
-    gap: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
+    minHeight: 40,
   },
-  uploadText: {
+  uploadToggleText: {
+    ...typography.button,
+    color: '#fff',
+  },
+  uploadOptionsContainer: {
+    flexDirection: 'row',
+    marginTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  uploadOptionButton: {
+    flex: 1,
+    maxWidth: 120,
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+  },
+  uploadOptionGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    gap: 4,
+    minHeight: 36,
+  },
+  uploadOptionText: {
     color: '#fff',
     fontWeight: '600',
-    fontSize: 13,
+    fontSize: 11,
     fontFamily: 'General Sans',
   },
   transcriptsSection: {
@@ -1243,17 +1268,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    fontFamily: 'General Sans',
+    ...typography.h2,
     color: colors.text.primary,
+    marginBottom: spacing.xs,
   },
   sectionSubtitle: {
-    fontSize: 14,
-    fontFamily: 'General Sans',
+    ...typography.caption,
     color: colors.text.secondary,
-    marginBottom: spacing.md,
-    lineHeight: 20,
+    marginBottom: spacing.lg,
+    textAlign: 'center',
   },
   refreshButton: {
     padding: 8,
@@ -1267,7 +1290,7 @@ const styles = StyleSheet.create({
   searchInputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background.card,
+    backgroundColor: `${colors.primary.light}15`,
     borderRadius: borderRadius.lg,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -1290,18 +1313,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   transcriptCard: {
-    marginBottom: spacing.sm,
-    borderRadius: borderRadius.lg,
+    marginBottom: spacing.lg,
+    borderRadius: borderRadius.xl,
     overflow: 'hidden',
+    ...shadows.card,
   },
   highlightedCard: {
     transform: [{ scale: 1.02 }],
+    ...shadows.button,
   },
   cardGradient: {
-    padding: spacing.md,
+    padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.surface.border,
-    borderRadius: borderRadius.lg,
+    borderRadius: borderRadius.xl,
+    backgroundColor: `${colors.primary.light}10`,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -1329,42 +1355,34 @@ const styles = StyleSheet.create({
     marginLeft: spacing.sm,
   },
   transcriptTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    fontFamily: 'General Sans',
+    ...typography.h3,
     color: colors.text.primary,
-    marginBottom: 2,
+    marginBottom: spacing.xs,
   },
   transcriptSummary: {
-    fontSize: 14,
-    fontFamily: 'General Sans',
+    ...typography.bodySecondary,
     color: colors.text.secondary,
     marginTop: spacing.sm,
-    lineHeight: 20,
   },
   transcriptText: {
-    ...typography.body,
+    ...typography.bodySecondary,
     color: colors.text.primary,
-    fontSize: 14,
-    lineHeight: 20,
+    lineHeight: 22,
   },
   aiTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    fontFamily: 'General Sans',
+    ...typography.h3,
     color: colors.text.primary,
-    marginBottom: 4,
+    marginBottom: spacing.sm,
   },
   aiSummary: {
-    ...typography.body,
+    ...typography.bodySecondary,
     color: colors.text.secondary,
-    fontSize: 14,
   },
   transcriptTime: {
-    ...typography.caption,
+    ...typography.micro,
     color: colors.text.secondary,
-    fontSize: 12,
     marginLeft: spacing.xs,
+    textTransform: 'none',
   },
   emptyState: {
     alignItems: 'center',
@@ -1399,7 +1417,7 @@ const styles = StyleSheet.create({
   },
   reportTitle: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '450',
     marginBottom: spacing.sm,
     color: colors.text.primary,
   },
@@ -1410,7 +1428,7 @@ const styles = StyleSheet.create({
   },
   reportSection: {
     marginTop: spacing.md,
-    fontWeight: '700',
+    fontWeight: '450',
     color: colors.text.primary,
   },
   reportBody: {
@@ -1438,7 +1456,7 @@ const styles = StyleSheet.create({
   },
   reportTitleInline: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '450',
     marginBottom: spacing.xs,
     color: colors.text.primary,
   },
@@ -1449,7 +1467,7 @@ const styles = StyleSheet.create({
   },
   reportSection: {
     marginTop: spacing.sm,
-    fontWeight: '700',
+    fontWeight: '450',
     color: colors.text.primary,
   },
   reportBody: {
@@ -1464,76 +1482,61 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   
-  // BLE Styles
-  bleSection: {
-    backgroundColor: colors.surface.primary,
-    borderRadius: borderRadius.md,
-    padding: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginVertical: spacing.xs,
-  },
-  bleButton: {
-    borderRadius: borderRadius.md,
+  // Compact Device Sync Chip
+  deviceSyncChip: {
+    alignSelf: 'center',
+    borderRadius: borderRadius.full,
     overflow: 'hidden',
-    marginVertical: 4,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
   },
-  bleGradient: {
+  deviceSyncGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    minHeight: 36,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    gap: 4,
   },
-  bleText: {
+  deviceSyncText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 10,
     fontWeight: '600',
     fontFamily: 'General Sans',
-    marginLeft: spacing.xs,
   },
-  disabledButton: {
-    opacity: 0.5,
+
+  // New Action Container Styles
+  actionsContainer: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: spacing.sm,
   },
-  deviceList: {
-    marginVertical: spacing.sm,
+  primaryChatButton: {
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    ...shadows.button,
   },
-  deviceListTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text.primary,
-    marginBottom: spacing.xs,
-  },
-  deviceItem: {
+  primaryChatGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.surface.secondary,
-    borderRadius: borderRadius.md,
-    padding: spacing.sm,
-    marginVertical: spacing.xs,
-    borderWidth: 2,
-    borderColor: 'transparent',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: spacing.xs,
+    minWidth: 80,
   },
-  selectedDevice: {
-    borderColor: colors.primary.main,
-    backgroundColor: `${colors.primary.main}10`,
+  primaryChatText: {
+    ...typography.button,
+    color: '#fff',
+    fontSize: 13,
   },
-  deviceInfo: {
-    flex: 1,
-  },
-  deviceName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text.primary,
-  },
-  deviceId: {
-    fontSize: 12,
-    color: colors.text.secondary,
-    marginTop: 2,
-  },
-  syncingContent: {
+  secondaryActions: {
     flexDirection: 'row',
-    alignItems: 'center',
+    gap: spacing.xs,
   },
-});
+  secondaryActionButton: {
+    padding: spacing.xs,
+    borderRadius: borderRadius.sm,
+    backgroundColor: `${colors.text.secondary}10`,
+  },
+}); // End of createStyles function

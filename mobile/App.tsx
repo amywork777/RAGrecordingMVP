@@ -8,7 +8,7 @@ import { View, Platform, Linking } from 'react-native';
 import RecordScreen from './src/screens/RecordScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import TranscriptionDetailScreen from './src/screens/TranscriptionDetailScreen';
-import { colors } from './src/theme/colors';
+import { useTheme } from './src/theme/colors';
 import DeepLinkService from './src/services/DeepLinkService';
 
 const Tab = createBottomTabNavigator();
@@ -16,6 +16,7 @@ const Stack = createStackNavigator();
 
 // Tab Navigator Component
 function MainTabs() {
+  const colors = useTheme();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -57,7 +58,7 @@ function MainTabs() {
         },
         tabBarLabelStyle: {
           fontSize: 12,
-          fontWeight: '600',
+          fontWeight: '450',
           fontFamily: 'General Sans',
           marginTop: 4,
         },

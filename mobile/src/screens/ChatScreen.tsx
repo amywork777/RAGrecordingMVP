@@ -15,7 +15,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import APIService from '../services/APIService';
-import { colors, spacing, borderRadius, typography } from '../theme/colors';
+import { useTheme, spacing, borderRadius, typography, shadows } from '../theme/colors';
 
 interface Message {
   id: string;
@@ -41,6 +41,8 @@ interface SearchResult {
 }
 
 export default function ChatScreen({ navigation }: any) {
+  const colors = useTheme();
+  const styles = createStyles(colors);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -328,7 +330,7 @@ export default function ChatScreen({ navigation }: any) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.primary,
@@ -393,23 +395,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   messageContainer: {
-    maxWidth: '75%',
-    padding: spacing.md,
-    borderRadius: borderRadius.lg,
+    maxWidth: '80%',
+    padding: spacing.lg,
+    borderRadius: borderRadius.xl,
+    ...shadows.card,
   },
   userMessage: {
     backgroundColor: colors.primary.main,
-    borderBottomRightRadius: 4,
+    borderBottomRightRadius: spacing.sm,
   },
   assistantMessage: {
-    backgroundColor: colors.background.elevated,
-    borderBottomLeftRadius: 4,
+    backgroundColor: colors.background.card,
+    borderBottomLeftRadius: spacing.sm,
     borderWidth: 1,
     borderColor: colors.surface.border,
   },
   messageText: {
-    ...typography.body,
+    ...typography.bodySecondary,
     color: colors.text.primary,
+    lineHeight: 22,
   },
   userMessageText: {
     color: '#fff',
@@ -512,4 +516,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-});
+}); // End of createStyles function
