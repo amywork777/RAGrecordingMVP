@@ -20,3 +20,4 @@ coverage/
 temp/
 uploads/
 .BLE_PROTOCOL.md
+.vercel
