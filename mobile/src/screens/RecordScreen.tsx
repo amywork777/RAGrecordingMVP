@@ -860,97 +860,97 @@ export default function RecordScreen({ route }: any) {
             {isRecording ? 'Tap to stop' : 'Tap to record'}
           </Text>
 
-          {/* Compact Upload Section */}
-          <View style={styles.uploadSection}>
+          {/* Upload and Sync Buttons */}
+          <View style={styles.actionButtonsContainer}>
             <TouchableOpacity
-              style={styles.uploadToggle}
+              style={styles.actionButton}
               onPress={() => setShowUploadOptions(!showUploadOptions)}
             >
               <LinearGradient
-                colors={[colors.accent.gradient1, colors.accent.gradient2]}
-                style={styles.uploadToggleGradient}
+                colors={[colors.primary.dark, colors.primary.main]}
+                style={styles.actionButtonGradient}
               >
                 <Ionicons name="cloud-upload" size={16} color="#fff" />
-                <Text style={styles.uploadToggleText}>Upload Files</Text>
+                <Text style={styles.actionButtonText}>Upload</Text>
                 <Ionicons 
                   name={showUploadOptions ? "chevron-up" : "chevron-down"} 
-                  size={16} 
+                  size={12} 
                   color="#fff" 
                 />
               </LinearGradient>
             </TouchableOpacity>
 
-            {showUploadOptions && (
-              <View style={styles.uploadOptionsContainer}>
-                <TouchableOpacity
-                  style={styles.uploadOptionButton}
-                  onPress={handleUploadText}
-                  disabled={isUploading}
-                >
-                  <LinearGradient
-                    colors={[colors.secondary.dark, colors.secondary.main]}
-                    style={styles.uploadOptionGradient}
-                  >
-                    {isUploading ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <>
-                        <Ionicons name="document-text" size={16} color="#fff" />
-                        <Text style={styles.uploadOptionText}>Text File</Text>
-                      </>
-                    )}
-                  </LinearGradient>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.uploadOptionButton}
-                  onPress={handleUploadAudio}
-                  disabled={isUploadingAudio}
-                >
-                  <LinearGradient
-                    colors={[colors.primary.dark, colors.primary.main]}
-                    style={styles.uploadOptionGradient}
-                  >
-                    {isUploadingAudio ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <>
-                        <Ionicons name="musical-notes" size={16} color="#fff" />
-                        <Text style={styles.uploadOptionText}>Audio File</Text>
-                      </>
-                    )}
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        </View>
-
-          {/* Compact Device Sync Chip */}
-          <TouchableOpacity
-            style={styles.deviceSyncChip}
-            onPress={autoSyncFromDevice}
-            disabled={isScanning || isSyncing}
-          >
-            <LinearGradient
-              colors={[colors.secondary.dark, colors.secondary.main]}
-              style={styles.deviceSyncGradient}
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={autoSyncFromDevice}
+              disabled={isScanning || isSyncing}
             >
-              {isScanning || isSyncing ? (
-                <>
-                  <ActivityIndicator color="#fff" size="small" />
-                  <Text style={styles.deviceSyncText}>
-                    {isScanning ? 'Scanning' : `${syncProgress.toFixed(0)}%`}
-                  </Text>
-                </>
-              ) : (
-                <>
-                  <Ionicons name="bluetooth" size={12} color="#fff" />
-                  <Text style={styles.deviceSyncText}>XIAO Sync</Text>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
+              <LinearGradient
+                colors={[colors.primary.dark, colors.primary.main]}
+                style={styles.actionButtonGradient}
+              >
+                {isScanning || isSyncing ? (
+                  <>
+                    <ActivityIndicator color="#fff" size="small" />
+                    <Text style={styles.actionButtonText}>
+                      {isScanning ? 'Scanning' : `${syncProgress.toFixed(0)}%`}
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="bluetooth" size={16} color="#fff" />
+                    <Text style={styles.actionButtonText}>Sync</Text>
+                  </>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+
+          {/* Upload Options (shown when Upload is expanded) */}
+          {showUploadOptions && (
+            <View style={styles.uploadOptionsContainer}>
+              <TouchableOpacity
+                style={styles.uploadOptionButton}
+                onPress={handleUploadText}
+                disabled={isUploading}
+              >
+                <LinearGradient
+                  colors={[colors.primary.light, colors.primary.main]}
+                  style={styles.uploadOptionGradient}
+                >
+                  {isUploading ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="document-text" size={16} color="#fff" />
+                      <Text style={styles.uploadOptionText}>Text File</Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.uploadOptionButton}
+                onPress={handleUploadAudio}
+                disabled={isUploadingAudio}
+              >
+                <LinearGradient
+                  colors={[colors.primary.light, colors.primary.main]}
+                  style={styles.uploadOptionGradient}
+                >
+                  {isUploadingAudio ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="musical-notes" size={16} color="#fff" />
+                      <Text style={styles.uploadOptionText}>Audio File</Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
 
         <View style={styles.transcriptsSection}>
           <View style={styles.transcriptsHeader}>
@@ -1062,7 +1062,10 @@ export default function RecordScreen({ route }: any) {
                               aiSummary: transcript.aiSummary || '',
                               topic: transcript.topic || '',
                             };
-                            navigation.navigate('TranscriptionDetail', { transcription: transcriptionData });
+                            navigation.navigate('TranscriptionDetail', { 
+                              transcription: transcriptionData,
+                              openChat: true
+                            });
                           }}
                           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         >
@@ -1177,7 +1180,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   recordContainer: {
     alignItems: 'center',
-    paddingVertical: spacing.xl,
+    paddingVertical: spacing.md,
   },
   recordButtonWrapper: {
     position: 'relative',
@@ -1204,37 +1207,45 @@ const createStyles = (colors: any) => StyleSheet.create({
     shadowRadius: 8,
   },
   recordHint: {
-    marginTop: spacing.lg,
+    marginTop: spacing.sm,
     ...typography.bodySecondary,
     color: colors.text.secondary,
     textAlign: 'center',
   },
-  uploadSection: {
-    marginTop: spacing.md,
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    marginTop: spacing.sm,
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
   },
-  uploadToggle: {
-    borderRadius: borderRadius.xl,
+  actionButton: {
+    flex: 1,
+    maxWidth: 120,
+    borderRadius: borderRadius.lg,
     overflow: 'hidden',
-    ...shadows.inset,
+    ...shadows.button,
   },
-  uploadToggleGradient: {
+  actionButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    gap: spacing.sm,
-    minHeight: 40,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    gap: spacing.xs,
+    minHeight: 36,
   },
-  uploadToggleText: {
+  actionButtonText: {
     ...typography.button,
     color: '#fff',
+    fontSize: 13,
   },
   uploadOptionsContainer: {
     flexDirection: 'row',
-    marginTop: spacing.sm,
-    gap: spacing.sm,
+    marginTop: spacing.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
   },
   uploadOptionButton: {
     flex: 1,
@@ -1246,10 +1257,10 @@ const createStyles = (colors: any) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    gap: 4,
-    minHeight: 36,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 4,
+    gap: 2,
+    minHeight: 28,
   },
   uploadOptionText: {
     color: '#fff',
@@ -1480,29 +1491,6 @@ const createStyles = (colors: any) => StyleSheet.create({
     color: colors.text.disabled,
     marginTop: spacing.sm,
     textAlign: 'center',
-  },
-  
-  // Compact Device Sync Chip
-  deviceSyncChip: {
-    alignSelf: 'center',
-    borderRadius: borderRadius.full,
-    overflow: 'hidden',
-    marginTop: spacing.xs,
-    marginBottom: spacing.sm,
-  },
-  deviceSyncGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    gap: 4,
-  },
-  deviceSyncText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '600',
-    fontFamily: 'General Sans',
   },
 
   // New Action Container Styles

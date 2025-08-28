@@ -30,6 +30,7 @@ interface TranscriptionDetailProps {
         topic?: string;
         recordingId: string;
       };
+      openChat?: boolean;
     };
   };
   navigation: any;
@@ -45,11 +46,11 @@ interface ChatMessage {
 export default function TranscriptionDetailScreen({ route, navigation }: TranscriptionDetailProps) {
   const colors = useTheme();
   const styles = createStyles(colors);
-  const { transcription } = route.params;
+  const { transcription, openChat } = route.params;
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [showChat, setShowChat] = useState(false);
+  const [showChat, setShowChat] = useState(openChat || false);
   const scrollViewRef = useRef<ScrollView>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
