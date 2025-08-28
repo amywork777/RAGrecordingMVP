@@ -10,6 +10,8 @@ interface FileInfo {
 class BLEFileTransferService {
   private manager: BleManager;
   private device: Device | null = null;
+  private lastDeviceId: string | null = null;
+  private keepAliveInterval: NodeJS.Timeout | null = null;
   private receivedData: Uint8Array = new Uint8Array();
   private receivedDataLength: number = 0;  // Track actual data length
   private expectedSeq: number = 0;
@@ -73,8 +75,7 @@ class BLEFileTransferService {
           }
 
           if (device) {
-            console.log(`BLE: Discovered device: ${device.name || 'Unknown'} (${device.id})`);
-            
+            // Only log relevant devices to reduce noise
             if (device.name === 'XIAO-REC' || 
                 device.name?.includes('XIAO') || 
                 device.name?.includes('REC')) {
@@ -84,6 +85,9 @@ class BLEFileTransferService {
                 deviceMap.set(device.id, device);
                 devices.push(device);
               }
+            } else if (device.name) {
+              // Only log named devices that aren't our target (reduces "Unknown" spam)
+              console.log(`BLE: Found other device: ${device.name}`);
             }
           }
         }
@@ -91,11 +95,14 @@ class BLEFileTransferService {
     });
   }
 
-  async connect(device: Device): Promise<boolean> {
+  async connect(device: Device, retryCount: number = 0): Promise<boolean> {
+    const maxRetries = 2;
+    
     try {
       console.log(`BLE: Connecting to ${device.name} (${device.id})...`);
       
       this.device = await this.manager.connectToDevice(device.id);
+      this.lastDeviceId = device.id; // Store for potential reconnection
       console.log('BLE: Connected, discovering services...');
       
       await this.device.discoverAllServicesAndCharacteristics();
@@ -126,11 +133,20 @@ class BLEFileTransferService {
       }
       
       this.reset();
+      this.startKeepAlive(); // Start connection monitoring
       
       return true;
     } catch (error) {
-      console.error('BLE: Connection failed:', error);
+      console.error(`BLE: Connection failed (attempt ${retryCount + 1}/${maxRetries + 1}):`, error);
       this.device = null;
+      
+      // Retry connection if we haven't exceeded max retries
+      if (retryCount < maxRetries) {
+        console.log(`BLE: Retrying connection in 2 seconds... (${retryCount + 1}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return this.connect(device, retryCount + 1);
+      }
+      
       return false;
     }
   }
@@ -380,6 +396,15 @@ class BLEFileTransferService {
         this.TX_DATA_UUID,
         async (error, characteristic) => {
           if (error) {
+            // Handle specific error types more gracefully
+            if (error.message?.includes('Operation was cancelled') || 
+                error.message?.includes('was disconnected')) {
+              console.log('BLE: Connection lost during file transfer, attempting reconnection...');
+              
+              // Attempt to reconnect and resume transfer
+              this.attemptReconnectionAndResume(resolve, reject, onProgress);
+              return;
+            }
             console.error('BLE: Notification error:', error);
             reject(error);
             return;
@@ -486,6 +511,92 @@ class BLEFileTransferService {
     });
   }
 
+  private async attemptReconnectionAndResume(
+    resolve: (value: Uint8Array) => void, 
+    reject: (error: Error) => void, 
+    onProgress?: (percent: number) => void
+  ): Promise<void> {
+    const maxReconnectAttempts = 3;
+    let reconnectAttempt = 0;
+    
+    while (reconnectAttempt < maxReconnectAttempts) {
+      try {
+        console.log(`BLE: Reconnection attempt ${reconnectAttempt + 1}/${maxReconnectAttempts}`);
+        
+        // Wait a moment before attempting to reconnect
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Clear the current device connection
+        this.device = null;
+        
+        // Try to find and reconnect to the same device
+        const devices = await this.scanForDevices(5000); // Quick 5-second scan
+        
+        // Prefer the same device if found
+        let targetDevice = devices[0];
+        if (this.lastDeviceId) {
+          const sameDevice = devices.find(d => d.id === this.lastDeviceId);
+          if (sameDevice) {
+            targetDevice = sameDevice;
+            console.log('BLE: Found same device for reconnection');
+          }
+        }
+        
+        if (targetDevice) {
+          const reconnected = await this.connect(targetDevice);
+          
+          if (reconnected) {
+            console.log('BLE: Reconnected successfully, resuming transfer...');
+            
+            // Resume the download from where we left off
+            const resumedData = await this.downloadFile(onProgress);
+            resolve(resumedData);
+            return;
+          }
+        }
+        
+        reconnectAttempt++;
+        
+      } catch (error) {
+        console.error(`BLE: Reconnection attempt ${reconnectAttempt + 1} failed:`, error);
+        reconnectAttempt++;
+      }
+    }
+    
+    // All reconnection attempts failed
+    console.error('BLE: All reconnection attempts failed');
+    reject(new Error('Connection lost and could not reconnect'));
+  }
+
+  private startKeepAlive(): void {
+    // Clear any existing keep-alive
+    this.stopKeepAlive();
+    
+    // Send periodic keep-alive signals every 10 seconds
+    this.keepAliveInterval = setInterval(async () => {
+      try {
+        if (this.device) {
+          // Simple keep-alive by checking device connection status
+          const isConnected = await this.device.isConnected();
+          if (!isConnected) {
+            console.log('BLE: Keep-alive detected disconnection');
+            this.stopKeepAlive();
+          }
+        }
+      } catch (error) {
+        console.log('BLE: Keep-alive check failed, device may be disconnected');
+        this.stopKeepAlive();
+      }
+    }, 10000);
+  }
+
+  private stopKeepAlive(): void {
+    if (this.keepAliveInterval) {
+      clearInterval(this.keepAliveInterval);
+      this.keepAliveInterval = null;
+    }
+  }
+
   async disconnect(): Promise<void> {
     if (this.device) {
       try {
@@ -493,10 +604,17 @@ class BLEFileTransferService {
         await this.device.cancelConnection();
         console.log('BLE: Disconnected');
       } catch (error) {
-        console.error('BLE: Disconnect error:', error);
+        // Suppress "Operation was cancelled" errors during normal disconnect
+        if (!error.message?.includes('Operation was cancelled')) {
+          console.error('BLE: Disconnect error:', error);
+        } else {
+          console.log('BLE: Disconnect cleanup completed');
+        }
       }
       this.device = null;
+      this.lastDeviceId = null;
     }
+    this.stopKeepAlive();
   }
 
   private reset(): void {

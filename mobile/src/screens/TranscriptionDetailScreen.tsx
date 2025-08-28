@@ -159,8 +159,8 @@ export default function TranscriptionDetailScreen({ route, navigation }: Transcr
       console.log('User message:', inputText);
       console.log('Making API call...');
       
-      // Call the new chat API endpoint with the transcription context
-      const response = await APIService.chatWithTranscription(transcription.id, inputText);
+      // Call the new chat API endpoint with the transcription context and content
+      const response = await APIService.chatWithTranscription(transcription.id, inputText, transcription.text);
       
       console.log('API response:', response);
       

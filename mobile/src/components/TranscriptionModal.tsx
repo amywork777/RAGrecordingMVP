@@ -151,7 +151,7 @@ export default function TranscriptionModal({ visible, onClose, transcription }: 
       console.log('User message:', inputText);
       console.log('Making API call...');
       
-      const response = await APIService.chatWithTranscription(transcription.id, inputText);
+      const response = await APIService.chatWithTranscription(transcription.id, inputText, transcription.text);
       
       console.log('API response:', response);
       

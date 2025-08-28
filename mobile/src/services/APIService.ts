@@ -262,19 +262,162 @@ class APIService {
     };
   }
 
-  async chatWithTranscription(transcriptionId: string, message: string): Promise<{ answer: string; transcriptionId: string; metadata: any }> {
-    const response = await fetch(`${API_BASE_URL}/api/chat/transcription`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcriptionId, message }),
-    });
+  async chatWithTranscription(transcriptionId: string, message: string, transcriptContent?: string): Promise<{ answer: string; transcriptionId: string; metadata: any }> {
+    console.log('=== TRANSCRIPT CHAT DEBUG ===');
+    console.log('Transcription ID:', transcriptionId);
+    console.log('User message:', message);
+    console.log('Has transcript content:', !!transcriptContent);
     
-    if (!response.ok) {
-      throw new Error(`Chat failed: ${response.statusText}`);
+    // Try the dedicated transcription chat endpoint first
+    try {
+      console.log('Trying dedicated chat endpoint...');
+      const response = await fetch(`${API_BASE_URL}/api/chat/transcription`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcriptionId, message }),
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('Chat endpoint successful:', result);
+        return result;
+      } else {
+        console.log('Dedicated endpoint failed, using transcript-focused approach...');
+      }
+    } catch (error) {
+      console.log('Dedicated endpoint error, using transcript-focused approach:', error.message);
     }
     
-    return response.json();
+    // Transcript-focused approach: Work with the specific transcript content only
+    if (transcriptContent) {
+      console.log('Using provided transcript content for conversation');
+      const conversationalAnswer = await this.generateConversationalResponse(message, transcriptContent);
+      return {
+        answer: conversationalAnswer,
+        transcriptionId,
+        metadata: { source: 'transcript-focused', hasContent: true }
+      };
+    } else {
+      // If we don't have the transcript content, we need to get it somehow
+      console.log('No transcript content provided, need to retrieve it');
+      return {
+        answer: `I'd love to chat about this transcript, but I don't have access to its content right now. Try refreshing or selecting the transcript again!`,
+        transcriptionId,
+        metadata: { source: 'no-content-available' }
+      };
+    }
   }
+  
+  private async generateConversationalResponse(question: string, transcriptContent: string): Promise<string> {
+    // Try to use AI to analyze the specific transcript content for better responses
+    console.log('Generating AI-powered conversational response for:', question);
+    console.log('Based on transcript:', transcriptContent.substring(0, 50) + '...');
+    
+    // First try to get AI analysis of this specific transcript
+    try {
+      const aiPrompt = this.createSmartPrompt(question, transcriptContent);
+      console.log('Using AI prompt:', aiPrompt.substring(0, 100) + '...');
+      
+      const response = await fetch(`${API_BASE_URL}/api/zeroentropy/search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          query: aiPrompt,
+          limit: 1,
+          useGPT: true 
+        }),
+      });
+
+      if (response.ok) {
+        const aiResponse = await response.json();
+        if (aiResponse.answer && aiResponse.answer.length > 20) {
+          console.log('AI generated intelligent response:', aiResponse.answer);
+          return aiResponse.answer;
+        }
+      }
+      
+      console.log('AI response not good enough, using fallback');
+    } catch (error) {
+      console.log('AI failed, using conversational fallback:', error);
+    }
+    
+    // Fallback to smart conversational response
+    return this.generateConversationalFallback(question, transcriptContent);
+  }
+  
+  private createSmartPrompt(question: string, transcriptContent: string): string {
+    const questionLower = question.toLowerCase();
+    
+    if (questionLower.includes('who')) {
+      return `I have a transcript that says: "${transcriptContent}". The user is asking "Who" - they want to know about people mentioned, or who might be speaking, or who this relates to. Give a conversational, helpful response based on what's actually in this transcript. Be engaging and reference the actual content.`;
+    } else if (questionLower.includes('what')) {
+      return `Looking at this transcript: "${transcriptContent}", the user asks "${question}". Analyze what's actually being discussed and give a natural, conversational response about the content. Be engaging and insightful about what they recorded.`;
+    } else if (questionLower.includes('why') || questionLower.includes('how')) {
+      return `In this recording, the user said: "${transcriptContent}". They're asking "${question}". Have a thoughtful conversation about the content, exploring the reasoning or methods based on what's actually in the transcript.`;
+    } else if (questionLower.includes('hi') || questionLower.includes('hello') || questionLower.includes('chat')) {
+      return `The user wants to chat about their recording where they said: "${transcriptContent}". Greet them warmly and start an engaging conversation about what they recorded. Ask interesting questions about their content.`;
+    } else if (questionLower.includes('tell me more') || questionLower.includes('elaborate')) {
+      return `Based on this transcript: "${transcriptContent}", the user wants more information. Expand on the content thoughtfully, ask follow-up questions, and encourage deeper discussion about what they recorded.`;
+    } else if (questionLower.includes('summarize') || questionLower.includes('summary')) {
+      return `Please provide an engaging, conversational summary of this transcript: "${transcriptContent}". Make it interesting and highlight key points in a natural way.`;
+    } else {
+      return `You're having a conversation with someone about their recording. They said: "${transcriptContent}" and now they're asking: "${question}". Respond naturally and conversationally, always referencing their actual content and being helpful and engaging.`;
+    }
+  }
+  
+  private generateConversationalFallback(question: string, transcriptContent: string): string {
+    const questionLower = question.toLowerCase();
+    
+    // Extract key topics or interesting parts from the transcript
+    const words = transcriptContent.toLowerCase().split(/\s+/);
+    const interestingWords = words.filter(word => 
+      word.length > 3 && 
+      !['hello', 'yeah', 'okay', 'like', 'just', 'well', 'that', 'this', 'with', 'have', 'been', 'they', 'were'].includes(word)
+    );
+    
+    const hasInterestingContent = interestingWords.length > 0;
+    const isShortRecording = transcriptContent.length < 50;
+    
+    if (questionLower.includes('hello') || questionLower.includes('hi') || questionLower.includes('chat')) {
+      if (hasInterestingContent) {
+        const topics = interestingWords.slice(0, 3).join(', ');
+        return `Hey! I see you mentioned ${topics} in this recording. What would you like to chat about? I can help you explore any of these topics or discuss other aspects of what you recorded.`;
+      } else {
+        return `Hi there! I see this was a short recording. Want to chat about what you were testing or thinking about when you made it?`;
+      }
+    }
+    
+    if (questionLower.includes('what') && questionLower.includes('think')) {
+      if (isShortRecording) {
+        return `Looking at what you said: "${transcriptContent}" - it seems like you were doing a quick test or note. What were you thinking about when you recorded this? Was there something specific you wanted to capture?`;
+      } else {
+        return `From what you recorded, it sounds like you had some interesting thoughts. What stands out to you most about what you said? I'd love to hear your perspective on it.`;
+      }
+    }
+    
+    if (questionLower.includes('why')) {
+      return `That's a great question! Based on what you said in the recording: "${transcriptContent.length > 100 ? transcriptContent.substring(0, 100) + '...' : transcriptContent}" - what do you think motivated those thoughts? I'm curious about your perspective.`;
+    }
+    
+    if (questionLower.includes('tell me more') || questionLower.includes('elaborate')) {
+      return `I'd love to hear more! In your recording you mentioned: "${transcriptContent.length > 100 ? transcriptContent.substring(0, 100) + '...' : transcriptContent}" - what else were you thinking about this topic? Any other thoughts that didn't make it into the recording?`;
+    }
+    
+    // Default conversational response
+    if (hasInterestingContent) {
+      return `Interesting! In your recording, you talked about ${interestingWords.slice(0, 2).join(' and ')}. How does that relate to what you're asking about? I'm here to chat about any aspect of your recording.`;
+    } else {
+      return `I hear you saying: "${transcriptContent}" - want to chat about what was on your mind when you recorded this? I'm curious to learn more about your thoughts.`;
+    }
+  }
+  
+  private generateContextualResponse(question: string, transcriptText: string, transcriptionId: string | null): string {
+    // This is now just a wrapper to the conversational fallback for consistency
+    return this.generateConversationalFallback(question, transcriptText);
+  }
+
 }
 
 export default new APIService();

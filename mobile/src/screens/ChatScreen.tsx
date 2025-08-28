@@ -40,6 +40,75 @@ interface SearchResult {
   score: number;
 }
 
+// Helper function to generate intelligent responses from search results
+const generateIntelligentResponse = (query: string, results: SearchResult[], sources?: any[]): string => {
+  if (!results || results.length === 0) return "I couldn't find anything about that in your recordings.";
+  
+  const queryLower = query.toLowerCase();
+  const isQuestion = queryLower.includes('what') || queryLower.includes('how') || queryLower.includes('when') || 
+                   queryLower.includes('where') || queryLower.includes('why') || queryLower.includes('?');
+  const isSummary = queryLower.includes('summarize') || queryLower.includes('summary') || queryLower.includes('main points');
+  
+  // Get results and create intelligent summary
+  const topResult = results[0];
+  const resultCount = results.length;
+  const score = topResult.score || 0;
+  
+  // Use the actual transcript text
+  let content = topResult.text.trim();
+  
+  // If content is very short and repetitive (like "hello hello"), be more conversational
+  const words = content.toLowerCase().split(/\s+/);
+  const uniqueWords = [...new Set(words)];
+  const isShortAndRepetitive = content.length < 100 && uniqueWords.length < words.length / 2;
+  
+  if (isShortAndRepetitive) {
+    // For short/repetitive content, be more conversational
+    const mentionedTopics = uniqueWords.filter(word => 
+      !['hello', 'hi', 'yeah', 'ok', 'okay', 'um', 'uh'].includes(word) && word.length > 2
+    );
+    
+    if (mentionedTopics.length > 0) {
+      const topics = mentionedTopics.join(', ');
+      return resultCount === 1
+        ? `I found a recording where you mentioned: ${topics}`
+        : `I found ${resultCount} recordings where you mentioned: ${topics}`;
+    }
+  }
+  
+  // For longer or more substantial content
+  let preview = content;
+  if (content.length > 200) {
+    // Try to cut at sentence or natural break
+    const sentences = content.split(/[.!?]+/);
+    if (sentences.length > 1) {
+      preview = sentences[0].trim() + '.';
+      if (preview.length < 50 && sentences[1]) {
+        preview += ' ' + sentences[1].trim() + '.';
+      }
+    } else {
+      preview = content.substring(0, 200) + '...';
+    }
+  }
+  
+  // Generate natural, conversational responses
+  if (isSummary) {
+    return resultCount === 1
+      ? `Here's what you recorded: "${preview}"`
+      : `You have ${resultCount} recordings about this. Here's the main one: "${preview}"`;
+  } else if (isQuestion) {
+    return resultCount === 1
+      ? `From your recording: "${preview}"`
+      : `I found ${resultCount} recordings that might help. Here's what you said: "${preview}"`;
+  } else {
+    // Default - more natural language
+    const confidenceLevel = score > 1.5 ? "You definitely mentioned" : "You talked about";
+    return resultCount === 1
+      ? `${confidenceLevel} this! Here's what you said: "${preview}"`
+      : `${confidenceLevel} this in ${resultCount} recordings. Here's the most relevant: "${preview}"`;
+  }
+};
+
 export default function ChatScreen({ navigation }: any) {
   const colors = useTheme();
   const styles = createStyles(colors);
@@ -66,7 +135,7 @@ export default function ChatScreen({ navigation }: any) {
       
       const welcomeMessage: Message = {
         id: 'welcome',
-        text: 'Ask me anything about your recordings.',
+        text: 'Hi! I can help you search through your recordings. Try searching for:\n\n• Specific topics or keywords\n• "What did I say about [topic]?"\n• "Summarize my notes"\n• Key phrases from your recordings\n\nI\'ll find the most relevant content and show you what you said!',
         isUser: false,
         timestamp: new Date(),
       };
@@ -103,10 +172,31 @@ export default function ChatScreen({ navigation }: any) {
 
     try {
       const searchResponse = await APIService.searchTranscripts(inputText);
+      console.log('=== CHAT DEBUG ===');
+      console.log('Query:', inputText);
+      console.log('Search response:', JSON.stringify(searchResponse, null, 2));
+      
+      let responseText = '';
+      
+      if (searchResponse.answer) {
+        // Use AI-generated answer if available from the search API
+        responseText = searchResponse.answer;
+      } else if (searchResponse.results && searchResponse.results.length > 0) {
+        // Generate intelligent response from search results
+        responseText = generateIntelligentResponse(inputText, searchResponse.results, searchResponse.sources);
+      } else if (searchResponse.sources && searchResponse.sources.length > 0) {
+        // Use sources as fallback
+        const source = searchResponse.sources[0];
+        responseText = `Based on your recordings, here's what I found:\n\n"${source.text}"`;
+      } else {
+        // No results found - check if we actually have any transcripts
+        console.log('No results found for query:', inputText);
+        responseText = "I couldn't find any recordings matching your query. This might be because:\n\n• No recordings contain those keywords\n• Try using different or more general terms\n• Check if you have transcripts uploaded\n\nWhat else would you like to search for?";
+      }
       
       const responseMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: searchResponse.answer || 'Here are the relevant recordings I found:',
+        text: responseText,
         isUser: false,
         timestamp: new Date(),
         results: searchResponse.answer ? undefined : searchResponse.results,
@@ -135,7 +225,7 @@ export default function ChatScreen({ navigation }: any) {
   const clearChat = () => {
     setMessages([{
       id: 'welcome',
-      text: 'Chat cleared. Ask me anything about your recordings.',
+      text: 'Chat cleared! I\'m ready to help you search and analyze your recordings again. What would you like to know?',
       isUser: false,
       timestamp: new Date(),
     }]);
