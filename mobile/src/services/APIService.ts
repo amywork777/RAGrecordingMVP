@@ -2,12 +2,20 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 function deriveDefaultBaseUrl(): string {
+  // Production backend URL for all non-development cases
+  const PRODUCTION_URL = 'https://backend-iy3pj7fnq-amy-zhous-projects-45e75853.vercel.app';
+  
   // 1) Respect explicit config if provided
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
   }
 
-  // 2) Try to infer host from Expo (works in Expo Go and dev builds)
+  // 2) Always use production URL for standalone builds (TestFlight/App Store)
+  if (Constants.executionEnvironment === 'standalone') {
+    return PRODUCTION_URL;
+  }
+
+  // 3) Try to infer host from Expo (works in Expo Go and dev builds)
   try {
     const anyConstants: any = Constants as any;
     const hostUri: string | undefined =
@@ -20,12 +28,17 @@ function deriveDefaultBaseUrl(): string {
     }
   } catch {}
 
-  // 3) Platform-specific dev fallbacks
+  // 4) Check if we're in a release/production environment even if not detected as standalone
+  if (__DEV__ === false || Constants.appOwnership === 'standalone') {
+    return PRODUCTION_URL;
+  }
+
+  // 5) Platform-specific dev fallbacks (only for development)
   if (Platform.OS === 'android') {
     // Android emulator special alias for host-loopback
     return 'http://10.0.2.2:3000';
   }
-  // iOS simulator / generic fallback
+  // iOS simulator / generic fallback for development
   return 'http://localhost:3000';
 }
 
@@ -33,6 +46,12 @@ const API_BASE_URL = deriveDefaultBaseUrl();
 // Helpful log to verify at runtime
 // eslint-disable-next-line no-console
 console.log('API base URL:', API_BASE_URL);
+// eslint-disable-next-line no-console
+console.log('Execution environment:', Constants.executionEnvironment);
+// eslint-disable-next-line no-console
+console.log('App ownership:', Constants.appOwnership);
+// eslint-disable-next-line no-console
+console.log('__DEV__:', __DEV__);
 
 interface TranscriptionResponse {
   transcription: string;
