@@ -164,7 +164,7 @@ export default function TranscriptionDetailScreen({ route, navigation }: Transcr
               colors={[colors.primary.main, colors.secondary.main]}
               style={styles.avatar}
             >
-              <Ionicons name="sparkles" size={12} color="#fff" />
+              <Ionicons name="sparkles" size={16} color="#fff" />
             </LinearGradient>
           </View>
         )}
@@ -183,7 +183,7 @@ export default function TranscriptionDetailScreen({ route, navigation }: Transcr
         {message.isUser && (
           <View style={styles.avatarContainer}>
             <View style={styles.userAvatar}>
-              <Ionicons name="person" size={12} color={colors.primary.main} />
+              <Ionicons name="person" size={16} color={colors.primary.main} />
             </View>
           </View>
         )}
@@ -317,7 +317,7 @@ export default function TranscriptionDetailScreen({ route, navigation }: Transcr
                   >
                     <Ionicons 
                       name="send" 
-                      size={16} 
+                      size={18} 
                       color={inputText.trim() ? '#fff' : colors.text.disabled} 
                     />
                   </LinearGradient>
@@ -432,14 +432,15 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   chatMessagesContainer: {
     flex: 1,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.lg,
   },
   chatMessagesContent: {
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.lg,
+    paddingBottom: spacing.xl,
   },
   chatMessageWrapper: {
     flexDirection: 'row',
-    marginBottom: spacing.sm,
+    marginBottom: spacing.lg,
     alignItems: 'flex-end',
   },
   userChatMessageWrapper: {
@@ -449,42 +450,47 @@ const createStyles = (colors: any) => StyleSheet.create({
     justifyContent: 'flex-start',
   },
   avatarContainer: {
-    marginHorizontal: spacing.xs,
+    marginHorizontal: spacing.sm,
   },
   avatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    ...shadows.card,
   },
   userAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: `${colors.primary.main}20`,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: `${colors.primary.main}30`,
   },
   chatMessageContainer: {
-    maxWidth: '75%',
-    padding: spacing.sm,
-    borderRadius: borderRadius.md,
+    maxWidth: '78%',
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
+    ...shadows.card,
   },
   userChatMessage: {
     backgroundColor: colors.primary.main,
-    borderBottomRightRadius: 4,
+    borderBottomRightRadius: spacing.xs,
   },
   assistantChatMessage: {
-    backgroundColor: colors.background.elevated,
-    borderBottomLeftRadius: 4,
+    backgroundColor: colors.background.card,
+    borderBottomLeftRadius: spacing.xs,
     borderWidth: 1,
     borderColor: colors.surface.border,
   },
   chatMessageText: {
-    ...typography.caption,
-    fontSize: 14,
+    ...typography.body,
+    fontSize: 15,
     color: colors.text.primary,
+    lineHeight: 22,
   },
   userChatMessageText: {
     color: '#fff',
@@ -492,45 +498,54 @@ const createStyles = (colors: any) => StyleSheet.create({
   loadingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.sm,
+    justifyContent: 'flex-start',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    marginLeft: 44, // Align with assistant messages (avatar + margin)
   },
   loadingText: {
     marginLeft: spacing.sm,
     color: colors.text.secondary,
-    ...typography.caption,
+    ...typography.body,
+    fontStyle: 'italic',
   },
   chatInputWrapper: {
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.lg,
+    paddingTop: spacing.sm,
   },
   chatInputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    borderRadius: borderRadius.lg,
-    padding: spacing.sm,
+    borderRadius: borderRadius.xl,
+    padding: spacing.md,
     borderWidth: 1,
     borderColor: colors.surface.border,
+    backgroundColor: colors.background.elevated,
+    ...shadows.card,
   },
   chatInput: {
     flex: 1,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    fontSize: 14,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: 15,
     fontFamily: 'General Sans',
     color: colors.text.primary,
+    lineHeight: 20,
+    minHeight: 40,
   },
   chatSendButton: {
-    marginLeft: spacing.sm,
+    marginLeft: spacing.md,
   },
   chatSendButtonDisabled: {
     opacity: 0.5,
   },
   chatSendButtonGradient: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    ...shadows.button,
   },
 }); // End of createStyles function
