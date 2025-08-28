@@ -12,11 +12,13 @@ import {
   SafeAreaView,
   Animated,
   Share,
+  Keyboard,
 } from 'react-native';
+import { PanGestureHandler, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import APIService from '../services/APIService';
-import { useTheme, spacing, borderRadius, typography } from '../theme/colors';
+import { useTheme, spacing, borderRadius, typography, shadows } from '../theme/colors';
 
 interface TranscriptionDetailProps {
   route: {
@@ -53,22 +55,74 @@ export default function TranscriptionDetailScreen({ route, navigation }: Transcr
   const [showChat, setShowChat] = useState(openChat || false);
   const scrollViewRef = useRef<ScrollView>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const messageAnimations = useRef<{ [key: string]: Animated.Value }>({});
+  const chatTransitionAnim = useRef(new Animated.Value(showChat ? 1 : 0)).current;
 
   useEffect(() => {
     // Initialize with a welcome message
-    setChatMessages([{
+    const welcomeMessage = {
       id: 'welcome',
       text: `Ask me anything about this transcription: "${transcription.aiTitle || 'Untitled'}"`,
       isUser: false,
       timestamp: new Date(),
-    }]);
+    };
+    
+    setChatMessages([welcomeMessage]);
+    
+    // Initialize animation for welcome message
+    messageAnimations.current[welcomeMessage.id] = new Animated.Value(0);
 
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 500,
       useNativeDriver: true,
     }).start();
+
+    // Animate welcome message
+    setTimeout(() => {
+      Animated.spring(messageAnimations.current[welcomeMessage.id], {
+        toValue: 1,
+        useNativeDriver: true,
+        tension: 100,
+        friction: 8,
+      }).start();
+    }, 200);
   }, []);
+
+  // Handle chat mode transitions
+  useEffect(() => {
+    Animated.timing(chatTransitionAnim, {
+      toValue: showChat ? 1 : 0,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+  }, [showChat]);
+
+  // Keyboard handling
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    });
+
+    return () => {
+      keyboardDidShowListener?.remove();
+    };
+  }, []);
+
+  const dismissKeyboard = () => {
+    Keyboard.dismiss();
+  };
+
+  const onPanGestureEvent = (event: any) => {
+    const { translationY, velocityY } = event.nativeEvent;
+    
+    // If user swipes down with sufficient velocity, dismiss keyboard
+    if (translationY > 50 && velocityY > 500) {
+      dismissKeyboard();
+    }
+  };
 
   const handleChatSend = async () => {
     if (!inputText.trim() || isLoading) return;
@@ -80,13 +134,24 @@ export default function TranscriptionDetailScreen({ route, navigation }: Transcr
       timestamp: new Date(),
     };
 
+    // Initialize animation for user message
+    messageAnimations.current[userMessage.id] = new Animated.Value(0);
+
     setChatMessages(prev => [...prev, userMessage]);
     setInputText('');
     setIsLoading(true);
 
+    // Animate user message
     setTimeout(() => {
+      Animated.spring(messageAnimations.current[userMessage.id], {
+        toValue: 1,
+        useNativeDriver: true,
+        tension: 120,
+        friction: 8,
+      }).start();
+      
       scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+    }, 50);
 
     try {
       console.log('=== CHAT DEBUG ===');
@@ -106,9 +171,20 @@ export default function TranscriptionDetailScreen({ route, navigation }: Transcr
         timestamp: new Date(),
       };
 
+      // Initialize animation for response message
+      messageAnimations.current[responseMessage.id] = new Animated.Value(0);
+
       setChatMessages(prev => [...prev, responseMessage]);
       
+      // Animate response message
       setTimeout(() => {
+        Animated.spring(messageAnimations.current[responseMessage.id], {
+          toValue: 1,
+          useNativeDriver: true,
+          tension: 100,
+          friction: 8,
+        }).start();
+        
         scrollViewRef.current?.scrollToEnd({ animated: true });
       }, 100);
     } catch (error) {
@@ -122,7 +198,21 @@ export default function TranscriptionDetailScreen({ route, navigation }: Transcr
         isUser: false,
         timestamp: new Date(),
       };
+      
+      // Initialize animation for error message
+      messageAnimations.current[errorMessage.id] = new Animated.Value(0);
+      
       setChatMessages(prev => [...prev, errorMessage]);
+      
+      // Animate error message
+      setTimeout(() => {
+        Animated.spring(messageAnimations.current[errorMessage.id], {
+          toValue: 1,
+          useNativeDriver: true,
+          tension: 100,
+          friction: 8,
+        }).start();
+      }, 100);
     } finally {
       setIsLoading(false);
     }
@@ -150,12 +240,36 @@ export default function TranscriptionDetailScreen({ route, navigation }: Transcr
   };
 
   const renderChatMessage = (message: ChatMessage) => {
+    // Ensure animation exists for message
+    if (!messageAnimations.current[message.id]) {
+      messageAnimations.current[message.id] = new Animated.Value(1);
+    }
+
+    const slideAnimation = {
+      opacity: messageAnimations.current[message.id],
+      transform: [
+        {
+          translateY: messageAnimations.current[message.id].interpolate({
+            inputRange: [0, 1],
+            outputRange: [20, 0],
+          }),
+        },
+        {
+          scale: messageAnimations.current[message.id].interpolate({
+            inputRange: [0, 1],
+            outputRange: [0.95, 1],
+          }),
+        },
+      ],
+    };
+
     return (
-      <View
+      <Animated.View
         key={message.id}
         style={[
           styles.chatMessageWrapper,
           message.isUser ? styles.userChatMessageWrapper : styles.assistantChatMessageWrapper,
+          slideAnimation,
         ]}
       >
         {!message.isUser && (
@@ -187,7 +301,7 @@ export default function TranscriptionDetailScreen({ route, navigation }: Transcr
             </View>
           </View>
         )}
-      </View>
+      </Animated.View>
     );
   };
 
@@ -265,11 +379,14 @@ export default function TranscriptionDetailScreen({ route, navigation }: Transcr
           </ScrollView>
         ) : (
           /* Chat Interface */
-          <KeyboardAvoidingView
-            style={styles.chatContainer}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-          >
+          <GestureHandlerRootView style={styles.chatContainer}>
+            <PanGestureHandler onGestureEvent={onPanGestureEvent}>
+              <Animated.View style={[styles.chatContainer, { opacity: chatTransitionAnim }]}>
+                <KeyboardAvoidingView
+                  style={styles.chatContainer}
+                  behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                  keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+                >
             <ScrollView 
               ref={scrollViewRef}
               style={styles.chatMessagesContainer}
@@ -324,7 +441,10 @@ export default function TranscriptionDetailScreen({ route, navigation }: Transcr
                 </TouchableOpacity>
               </LinearGradient>
             </View>
-          </KeyboardAvoidingView>
+                </KeyboardAvoidingView>
+              </Animated.View>
+            </PanGestureHandler>
+          </GestureHandlerRootView>
         )}
       </LinearGradient>
     </SafeAreaView>
@@ -378,7 +498,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   summaryCard: {
     backgroundColor: colors.background.elevated,
     borderRadius: borderRadius.lg,
-    padding: spacing.lg,
+    padding: 8,
     marginBottom: spacing.lg,
     borderWidth: 1,
     borderColor: colors.surface.border,
@@ -396,7 +516,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   metadataCard: {
     backgroundColor: colors.background.card,
     borderRadius: borderRadius.lg,
-    padding: spacing.lg,
+    padding: 8,
     marginBottom: spacing.lg,
   },
   metadataRow: {
@@ -412,7 +532,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   transcriptionCard: {
     backgroundColor: colors.background.elevated,
     borderRadius: borderRadius.lg,
-    padding: spacing.lg,
+    padding: 8,
     borderWidth: 1,
     borderColor: colors.surface.border,
   },
@@ -432,15 +552,15 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   chatMessagesContainer: {
     flex: 1,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.md,
   },
   chatMessagesContent: {
-    paddingVertical: spacing.lg,
-    paddingBottom: spacing.xl,
+    paddingVertical: spacing.md,
+    paddingBottom: spacing.lg,
   },
   chatMessageWrapper: {
     flexDirection: 'row',
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
     alignItems: 'flex-end',
   },
   userChatMessageWrapper: {
@@ -450,7 +570,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     justifyContent: 'flex-start',
   },
   avatarContainer: {
-    marginHorizontal: spacing.sm,
+    marginHorizontal: spacing.xs,
   },
   avatar: {
     width: 32,
@@ -472,7 +592,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   chatMessageContainer: {
     maxWidth: '78%',
-    padding: spacing.md,
+    padding: 6,
     borderRadius: borderRadius.lg,
     ...shadows.card,
   },
@@ -499,9 +619,9 @@ const createStyles = (colors: any) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-start',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    marginLeft: 44, // Align with assistant messages (avatar + margin)
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginLeft: 40, // Align with assistant messages (avatar + smaller margin)
   },
   loadingText: {
     marginLeft: spacing.sm,
@@ -510,9 +630,9 @@ const createStyles = (colors: any) => StyleSheet.create({
     fontStyle: 'italic',
   },
   chatInputWrapper: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.lg,
-    paddingTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+    paddingTop: spacing.xs,
   },
   chatInputContainer: {
     flexDirection: 'row',

@@ -849,7 +849,7 @@ export default function RecordScreen({ route }: any) {
               ) : (
                 <Ionicons 
                   name={isRecording ? 'stop' : 'mic'} 
-                  size={32} 
+                  size={24} 
                   color="#fff" 
                 />
               )}
@@ -870,11 +870,11 @@ export default function RecordScreen({ route }: any) {
                 colors={[colors.primary.dark, colors.primary.main]}
                 style={styles.actionButtonGradient}
               >
-                <Ionicons name="cloud-upload" size={16} color="#fff" />
+                <Ionicons name="cloud-upload" size={12} color="#fff" />
                 <Text style={styles.actionButtonText}>Upload</Text>
                 <Ionicons 
                   name={showUploadOptions ? "chevron-up" : "chevron-down"} 
-                  size={12} 
+                  size={10} 
                   color="#fff" 
                 />
               </LinearGradient>
@@ -898,7 +898,7 @@ export default function RecordScreen({ route }: any) {
                   </>
                 ) : (
                   <>
-                    <Ionicons name="bluetooth" size={16} color="#fff" />
+                    <Ionicons name="bluetooth" size={12} color="#fff" />
                     <Text style={styles.actionButtonText}>Sync</Text>
                   </>
                 )}
@@ -922,8 +922,8 @@ export default function RecordScreen({ route }: any) {
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
                     <>
-                      <Ionicons name="document-text" size={16} color="#fff" />
-                      <Text style={styles.uploadOptionText}>Text File</Text>
+                      <Ionicons name="document-text" size={10} color="#fff" />
+                      <Text style={styles.uploadOptionText}>Text</Text>
                     </>
                   )}
                 </LinearGradient>
@@ -942,8 +942,8 @@ export default function RecordScreen({ route }: any) {
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
                     <>
-                      <Ionicons name="musical-notes" size={16} color="#fff" />
-                      <Text style={styles.uploadOptionText}>Audio File</Text>
+                      <Ionicons name="musical-notes" size={10} color="#fff" />
+                      <Text style={styles.uploadOptionText}>Audio</Text>
                     </>
                   )}
                 </LinearGradient>
@@ -1180,7 +1180,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   recordContainer: {
     alignItems: 'center',
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
   },
   recordButtonWrapper: {
     position: 'relative',
@@ -1189,71 +1189,44 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   pulseCircle: {
     position: 'absolute',
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     backgroundColor: colors.accent.error,
   },
   recordButton: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 8,
+    elevation: 6,
     shadowColor: colors.primary.main,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
   },
   recordHint: {
-    marginTop: spacing.sm,
-    ...typography.bodySecondary,
+    marginTop: spacing.xs,
+    ...typography.caption,
     color: colors.text.secondary,
     textAlign: 'center',
   },
   actionButtonsContainer: {
-    flexDirection: 'row',
-    marginTop: spacing.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-  },
-  actionButton: {
-    flex: 1,
-    maxWidth: 120,
-    borderRadius: borderRadius.lg,
-    overflow: 'hidden',
-    ...shadows.button,
-  },
-  actionButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    gap: spacing.xs,
-    minHeight: 36,
-  },
-  actionButtonText: {
-    ...typography.button,
-    color: '#fff',
-    fontSize: 13,
-  },
-  uploadOptionsContainer: {
     flexDirection: 'row',
     marginTop: spacing.xs,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.xs,
   },
-  uploadOptionButton: {
+  actionButton: {
     flex: 1,
-    maxWidth: 120,
+    maxWidth: 90,
     borderRadius: borderRadius.md,
     overflow: 'hidden',
+    ...shadows.inset,
   },
-  uploadOptionGradient: {
+  actionButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1262,10 +1235,38 @@ const createStyles = (colors: any) => StyleSheet.create({
     gap: 2,
     minHeight: 28,
   },
+  actionButtonText: {
+    ...typography.caption,
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  uploadOptionsContainer: {
+    flexDirection: 'row',
+    marginTop: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  uploadOptionButton: {
+    flex: 1,
+    maxWidth: 80,
+    borderRadius: borderRadius.sm,
+    overflow: 'hidden',
+  },
+  uploadOptionGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    gap: 1,
+    minHeight: 22,
+  },
   uploadOptionText: {
     color: '#fff',
     fontWeight: '600',
-    fontSize: 11,
+    fontSize: 9,
     fontFamily: 'General Sans',
   },
   transcriptsSection: {
@@ -1334,7 +1335,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     ...shadows.button,
   },
   cardGradient: {
-    padding: spacing.lg,
+    padding: 8,
     borderWidth: 1,
     borderColor: colors.surface.border,
     borderRadius: borderRadius.xl,

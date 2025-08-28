@@ -510,7 +510,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   summaryCard: {
     backgroundColor: colors.background.elevated,
     borderRadius: borderRadius.lg,
-    padding: spacing.lg,
+    padding: 8,
     marginBottom: spacing.lg,
     borderWidth: 1,
     borderColor: colors.surface.border,
@@ -528,7 +528,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   metadataCard: {
     backgroundColor: colors.background.card,
     borderRadius: borderRadius.lg,
-    padding: spacing.lg,
+    padding: 8,
     marginBottom: spacing.lg,
   },
   metadataRow: {
@@ -544,7 +544,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   transcriptionCard: {
     backgroundColor: colors.background.elevated,
     borderRadius: borderRadius.lg,
-    padding: spacing.lg,
+    padding: 8,
     borderWidth: 1,
     borderColor: colors.surface.border,
   },

@@ -396,7 +396,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   messageContainer: {
     maxWidth: '80%',
-    padding: spacing.lg,
+    padding: 8,
     borderRadius: borderRadius.xl,
     ...shadows.card,
   },
@@ -450,7 +450,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   resultItem: {
     backgroundColor: colors.background.card,
-    padding: spacing.sm,
+    padding: 8,
     borderRadius: borderRadius.md,
     marginTop: spacing.xs,
     borderWidth: 1,
