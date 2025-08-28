@@ -11,6 +11,7 @@ class BLEFileTransferService {
   private manager: BleManager;
   private device: Device | null = null;
   private receivedData: Uint8Array = new Uint8Array();
+  private receivedDataLength: number = 0;  // Track actual data length
   private expectedSeq: number = 0;
   private packetBuffer: Map<number, Uint8Array> = new Map();
   private fileSize: number = 0;
@@ -18,6 +19,8 @@ class BLEFileTransferService {
   private transferComplete: boolean = false;
   private credits: number = 0;
   private totalPackets: number = 0;
+  private lastProgressUpdate: number = 0;  // For throttling progress updates
+  private lastReceivedBytes: number = 0;  // For stall detection
   
   // UUIDs from hardware
   private readonly SERVICE_UUID = 'a3f9b7f0-52d1-4c7a-8f1c-7a1b9b2f0001';
@@ -98,6 +101,30 @@ class BLEFileTransferService {
       await this.device.discoverAllServicesAndCharacteristics();
       console.log('BLE: Services discovered');
       
+      // Connection optimization - request maximum MTU and high priority if available
+      try {
+        // Request maximum MTU (517 bytes) for higher throughput
+        const mtu = await this.device.requestMTU(517);
+        console.log(`BLE: MTU negotiated: ${mtu} bytes`);
+      } catch (error) {
+        console.log('BLE: MTU request not supported, using default');
+      }
+      
+      try {
+        // Request high connection priority for lower latency (if supported)
+        if (Platform.OS === 'android') {
+          // This method may not be available in all BLE library versions
+          // @ts-ignore
+          if (typeof this.device.requestConnectionPriority === 'function') {
+            // @ts-ignore
+            await this.device.requestConnectionPriority(0); // High priority
+            console.log('BLE: Requested high connection priority');
+          }
+        }
+      } catch (error) {
+        console.log('BLE: Connection priority request not supported');
+      }
+      
       this.reset();
       
       return true;
@@ -159,6 +186,28 @@ class BLEFileTransferService {
     return crc;
   }
 
+  private sendCreditsAsync(numCredits: number): void {
+    if (!this.device) return;
+    
+    // Use queueMicrotask to avoid blocking the notification handler
+    queueMicrotask(() => {
+      try {
+        const data = Buffer.from([numCredits]);
+        this.device!.writeCharacteristicWithoutResponseForService(
+          this.SERVICE_UUID,
+          this.RX_CREDITS_UUID,
+          data.toString('base64')
+        ).then(() => {
+          this.credits += numCredits;
+        }).catch((error) => {
+          console.error('BLE: Failed to send credits:', error);
+        });
+      } catch (error) {
+        console.error('BLE: Failed to queue credits:', error);
+      }
+    });
+  }
+
   async sendCredits(numCredits: number): Promise<void> {
     if (!this.device) return;
     
@@ -175,34 +224,51 @@ class BLEFileTransferService {
     }
   }
 
+  private shouldUpdateProgress(): boolean {
+    const currentTime = Date.now();
+    if (currentTime - this.lastProgressUpdate > 100) {  // Update every 100ms max
+      this.lastProgressUpdate = currentTime;
+      return true;
+    }
+    return false;
+  }
+
   private processBufferedPackets(): void {
     while (this.packetBuffer.has(this.expectedSeq)) {
       const payload = this.packetBuffer.get(this.expectedSeq)!;
       this.packetBuffer.delete(this.expectedSeq);
-      this.receivedData = this.appendData(this.receivedData, payload);
+      
+      // Optimized data append - write directly to pre-allocated buffer
+      if (this.receivedDataLength + payload.length <= this.receivedData.length) {
+        this.receivedData.set(payload, this.receivedDataLength);
+        this.receivedDataLength += payload.length;
+      } else {
+        // Fallback if we exceed pre-allocated size
+        const newData = new Uint8Array(this.receivedDataLength + payload.length);
+        newData.set(this.receivedData.slice(0, this.receivedDataLength));
+        newData.set(payload, this.receivedDataLength);
+        this.receivedData = newData;
+        this.receivedDataLength += payload.length;
+      }
+      
       this.expectedSeq++;
     }
     
-    // Clean up old packets if buffer too large
+    // Clean up old packets if buffer gets too large
     if (this.packetBuffer.size > 100) {
+      // Remove oldest packets (lowest sequence numbers) - keep ~50 most recent
       const sortedKeys = Array.from(this.packetBuffer.keys()).sort((a, b) => a - b);
-      const cutoff = sortedKeys[sortedKeys.length - 50];
-      for (const [seq] of this.packetBuffer) {
-        if (seq < cutoff) {
-          this.packetBuffer.delete(seq);
-        }
+      const toRemove = sortedKeys.slice(0, sortedKeys.length - 50);
+      for (const seq of toRemove) {
+        this.packetBuffer.delete(seq);
+        console.log(`\n⚠ Dropped old packet ${seq} (buffer overflow)`);
       }
     }
   }
 
-  private appendData(current: Uint8Array, payload: Uint8Array): Uint8Array {
-    const newData = new Uint8Array(current.length + payload.length);
-    newData.set(current);
-    newData.set(payload, current.length);
-    return newData;
-  }
+  // Removed appendData method - now using direct buffer writes in processBufferedPackets
 
-  private async handleNotification(data: Uint8Array): Promise<void> {
+  private handleNotification(data: Uint8Array): void {
     if (data.length < 8) {
       return;
     }
@@ -236,36 +302,50 @@ class BLEFileTransferService {
     if (seq < this.expectedSeq) {
       return; // Old packet
     } else if (seq === this.expectedSeq) {
-      this.receivedData = this.appendData(this.receivedData, payload);
+      // Perfect! This is the next expected packet
+      if (this.receivedDataLength + payload.length <= this.receivedData.length) {
+        this.receivedData.set(payload, this.receivedDataLength);
+        this.receivedDataLength += payload.length;
+      } else {
+        // Fallback if we exceed pre-allocated size
+        const newData = new Uint8Array(this.receivedDataLength + payload.length);
+        newData.set(this.receivedData.slice(0, this.receivedDataLength));
+        newData.set(payload, this.receivedDataLength);
+        this.receivedData = newData;
+        this.receivedDataLength += payload.length;
+      }
       this.expectedSeq++;
+      
+      // Process any buffered packets that are now in order
       this.processBufferedPackets();
     } else {
-      // Buffer out-of-order packet
-      if (!this.packetBuffer.has(seq)) {
+      // Out of order packet - buffer it for later
+      if (!this.packetBuffer.has(seq)) {  // Avoid duplicate buffering
         this.packetBuffer.set(seq, payload);
         
-        // Only log and handle large gaps like Python
+        // If gap is too large, we might have missed packets - process what we can
         if (seq - this.expectedSeq > 50) {
-          console.log(`\n⚠ Large gap: expected ${this.expectedSeq}, got ${seq}`);
+          console.log(`\n⚠ Large gap detected: expected ${this.expectedSeq}, got ${seq}`);
+          // Find the next contiguous sequence we can process
           const availableSeqs = Array.from(this.packetBuffer.keys())
             .filter(s => s >= this.expectedSeq)
             .sort((a, b) => a - b);
           
           if (availableSeqs.length > 0) {
+            // Skip to the next available sequence to avoid waiting forever
             const nextSeq = availableSeqs[0];
-            if (nextSeq - this.expectedSeq <= 10) {
-              console.log(`  Skipping to packet ${nextSeq}`);
-              this.expectedSeq = nextSeq;
-              this.processBufferedPackets();
-            }
+            console.log(`  Skipping to packet ${nextSeq} (gap of ${nextSeq - this.expectedSeq})`);
+            this.expectedSeq = nextSeq;
+            this.processBufferedPackets();
           }
         }
       }
     }
     
-    // Send credits exactly like Python - every 2 packets
-    if (this.totalPackets % 2 === 0) {
-      await this.sendCredits(2);
+    // Optimized credit system for higher throughput - send credits asynchronously
+    // Send credits more aggressively for high-speed transmission
+    if (this.totalPackets % 2 === 0) {  // Every 2 packets instead of 3
+      this.sendCreditsAsync(2);  // Send 2 credits at a time for faster flow
     }
   }
 
@@ -277,17 +357,21 @@ class BLEFileTransferService {
     console.log('BLE: Starting file download...');
     
     // Reset state
-    this.receivedData = new Uint8Array();
+    // Pre-allocate buffer based on file size for better performance
+    this.receivedData = new Uint8Array(this.fileSize > 0 ? this.fileSize + 1000 : 1024 * 1024); // Add some buffer or default to 1MB
+    this.receivedDataLength = 0;
     this.expectedSeq = 0;
     this.totalPackets = 0;
     this.credits = 0;
     this.transferComplete = false;
     this.packetBuffer.clear();
+    this.lastProgressUpdate = 0;
     
     const startTime = Date.now();
     let lastReceived = 0;
     let stallCount = 0;
-    let lastProgress = 0;
+    let lastProgressPercent = 0;
+    let stallCheck: NodeJS.Timeout;
     
     return new Promise((resolve, reject) => {
       // Subscribe to notifications
@@ -303,69 +387,86 @@ class BLEFileTransferService {
           
           if (characteristic?.value) {
             const data = Buffer.from(characteristic.value, 'base64');
-            await this.handleNotification(new Uint8Array(data));
+            // Call handleNotification synchronously (it's now non-blocking)
+            this.handleNotification(new Uint8Array(data));
             
-            // Progress update throttled
-            const progress = (this.receivedData.length / this.fileSize) * 100;
-            if (progress - lastProgress > 0.1) {
+            // Throttled progress update for better performance
+            if (this.shouldUpdateProgress()) {
+              const progress = (this.receivedDataLength / this.fileSize) * 100;
               const elapsed = (Date.now() - startTime) / 1000;
-              const speed = this.receivedData.length / elapsed;
-              console.log(`\rPacket ${this.expectedSeq}: ${this.receivedData.length}/${this.fileSize} bytes ` +
-                         `(${progress.toFixed(1)}%) - ${(speed/1024).toFixed(1)} KB/s [${this.packetBuffer.size} buffered]`);
+              const speed = this.receivedDataLength / elapsed;
+              const buffered = this.packetBuffer.size;
+              
+              console.log(`\rPacket ${this.expectedSeq - 1}: ${this.receivedDataLength}/${this.fileSize} bytes ` +
+                         `(${progress.toFixed(1)}%) - ${(speed/1024).toFixed(1)} KB/s [${buffered} buffered]`);
               
               if (onProgress) onProgress(Math.min(progress, 100));
-              lastProgress = progress;
+              lastProgressPercent = progress;
             }
             
-            // Check completion
-            if (this.transferComplete || this.receivedData.length >= this.fileSize) {
-              const elapsed = (Date.now() - startTime) / 1000;
-              const speed = this.receivedData.length / elapsed;
-              console.log(`\n✓ Download complete: ${this.receivedData.length} bytes in ${this.totalPackets} packets`);
-              console.log(`  Average speed: ${(speed/1024).toFixed(1)} KB/s`);
-              console.log(`  Total time: ${elapsed.toFixed(1)} seconds`);
-              if (onProgress) onProgress(100);
-              resolve(this.receivedData);
-            }
+            // Don't check completion here - let the main loop handle it
+            // This ensures we wait for EOF packet or exact size match
           }
         }
       );
       
-      // Send initial credits and start monitoring
+      // Send initial credits (aggressive for high-speed transmission)
       this.sendCredits(64).then(() => {
-        console.log('✓ Sent initial credits (64)');
+        console.log('✓ Sent initial credits (64 for high-speed mode)');
         
-        // Stall detection exactly like Python
-        const stallCheck = setInterval(async () => {
-          if (this.receivedData.length === lastReceived) {
+        // Main download loop - similar to Python's while loop structure
+        stallCheck = setInterval(async () => {
+          // Exit condition matching Python: continue while data < fileSize AND not complete
+          if (this.transferComplete || this.receivedDataLength >= this.fileSize) {
+            const elapsed = (Date.now() - startTime) / 1000;
+            const speed = this.receivedDataLength / elapsed;
+            console.log(`\n✓ Download complete: ${this.receivedDataLength} bytes in ${this.totalPackets} packets`);
+            console.log(`  Average speed: ${(speed/1024).toFixed(1)} KB/s`);
+            console.log(`  Total time: ${elapsed.toFixed(1)} seconds`);
+            if (this.packetBuffer.size > 0) {
+              console.log(`  Warning: ${this.packetBuffer.size} packets still in reorder buffer`);
+            }
+            if (onProgress) onProgress(100);
+            clearInterval(stallCheck);
+            resolve(this.receivedData.slice(0, this.receivedDataLength));
+            return;
+          }
+          
+          // Stall detection exactly like Python
+          if (this.receivedDataLength === lastReceived) {
             stallCount++;
-            if (stallCount > 20) {
-              const progress = (this.receivedData.length / this.fileSize) * 100;
+            if (stallCount > 20) {  // 10 seconds of no progress (longer for high-speed)
+              // Check if we're at 99%+ complete (fallback for old protocol)
+              const progress = (this.receivedDataLength / this.fileSize) * 100;
               if (progress >= 99.0) {
                 console.log(`\n✓ Transfer nearly complete at ${progress.toFixed(1)}% - accepting as done`);
                 clearInterval(stallCheck);
-                resolve(this.receivedData);
+                resolve(this.receivedData.slice(0, this.receivedDataLength));
                 return;
               }
               
-              console.log(`\n⚠ Transfer stalled at ${this.receivedData.length} bytes (${progress.toFixed(1)}%)`);
+              console.log(`\n⚠ Transfer stalled at ${this.receivedDataLength} bytes (${progress.toFixed(1)}%)`);
               console.log(`   Buffer contains ${this.packetBuffer.size} out-of-order packets`);
               
+              // For high-speed mode, send more credits and be more aggressive
               await this.sendCredits(32);
               stallCount = 0;
               
+              // If we have buffered packets, try to process them
               if (this.packetBuffer.size > 0) {
-                const minSeq = Math.min(...Array.from(this.packetBuffer.keys()));
-                if (minSeq - this.expectedSeq <= 10) {
-                  console.log(`   Skipping gap: ${this.expectedSeq} -> ${minSeq}`);
-                  this.expectedSeq = minSeq;
+                console.log("   Attempting to process buffered packets...");
+                // Find the lowest sequence number we can start from
+                const minBufferedSeq = Math.min(...Array.from(this.packetBuffer.keys()));
+                if (minBufferedSeq - this.expectedSeq <= 10) {  // Small gap, skip ahead
+                  console.log(`   Skipping gap: ${this.expectedSeq} -> ${minBufferedSeq}`);
+                  this.expectedSeq = minBufferedSeq;
                   this.processBufferedPackets();
                 }
               }
             }
           } else {
             stallCount = 0;
-            lastReceived = this.receivedData.length;
+            lastReceived = this.receivedDataLength;
           }
         }, 500);
         
@@ -377,7 +478,7 @@ class BLEFileTransferService {
               reject(new Error('Timeout: No data received'));
             } else {
               console.log('Timeout: Accepting partial transfer');
-              resolve(this.receivedData);
+              resolve(this.receivedData.slice(0, this.receivedDataLength));
             }
           }
         }, 60000);
@@ -400,6 +501,7 @@ class BLEFileTransferService {
 
   private reset(): void {
     this.receivedData = new Uint8Array();
+    this.receivedDataLength = 0;
     this.expectedSeq = 0;
     this.packetBuffer.clear();
     this.transferComplete = false;
@@ -407,6 +509,7 @@ class BLEFileTransferService {
     this.totalPackets = 0;
     this.fileSize = 0;
     this.fileName = '';
+    this.lastProgressUpdate = 0;
   }
 
   isConnected(): boolean {
