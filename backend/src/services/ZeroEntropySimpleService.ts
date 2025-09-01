@@ -52,23 +52,30 @@ class ZeroEntropySimpleService {
   }
 
   async search(query: string, limit: number = 5): Promise<SearchResult[]> {
+    // When mock data is disabled, return empty results
+    // This prevents animal mock data from appearing in the app
     if (!this.useMockData && this.apiKey) {
-      console.log(`[ZeroEntropy] Real API search not yet implemented - using mock data temporarily`);
+      console.log(`[ZeroEntropy] Mock data disabled - returning empty results until real documents are available`);
       console.log(`[ZeroEntropy] Query: "${query}", limit: ${limit}`);
-      // TODO: Implement real ZeroEntropy search API once the search endpoint is available
+      return [];
     }
     
-    // Use mock data (temporarily until real search API is implemented)
-    const results = await MockDataService.searchTranscripts(query, limit);
-    return results.map(r => ({
-      id: r.id,
-      text: r.text,
-      score: Math.random() * 0.3 + 0.7,
-      metadata: {
-        timestamp: r.timestamp,
-        recordingId: r.recordingId
-      }
-    }));
+    // Only use mock data if explicitly enabled
+    if (this.useMockData) {
+      const results = await MockDataService.searchTranscripts(query, limit);
+      return results.map(r => ({
+        id: r.id,
+        text: r.text,
+        score: Math.random() * 0.3 + 0.7,
+        metadata: {
+          timestamp: r.timestamp,
+          recordingId: r.recordingId
+        }
+      }));
+    }
+    
+    // Return empty results when mock data is disabled and no API key
+    return [];
   }
 
   async generateAnswer(query: string, context: SearchResult[]): Promise<string> {
