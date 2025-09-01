@@ -99,18 +99,72 @@ class ZeroEntropyService {
 
       if (response.ok) {
         const data: any = await response.json();
-        console.log(`[ZeroEntropyService] Retrieved ${data.documents?.length || 0} real documents`);
         
-        if (data.documents && data.documents.length > 0) {
-          return data.documents.map((doc: any) => ({
-            id: doc.id || 'unknown',
-            text: doc.path || doc.text || 'No content available', // Use path for now since content isn't directly available
-            score: doc.score || 0.95, // Use score from search, or high score for list
-            metadata: {
-              timestamp: doc.created_at || doc.metadata?.timestamp || new Date().toISOString(),
-              recordingId: doc.metadata?.recordingId || doc.path || doc.id || 'unknown'
-            }
-          }));
+        // Handle different API response formats
+        const results = data.results || data.documents || [];
+        console.log(`[ZeroEntropyService] Retrieved ${results.length} search results`);
+        
+        if (results.length > 0) {
+          // Fetch actual content for the search results
+          const resultsWithContent = await Promise.all(
+            results.map(async (result: any) => {
+              try {
+                // Get document content using the path
+                const contentResponse = await fetch(`https://api.zeroentropy.dev/v1/documents/get-document-info`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    collection_name: 'ai-wearable-transcripts',
+                    path: result.path,
+                    include_content: true,
+                  }),
+                });
+
+                if (contentResponse.ok) {
+                  const contentData: any = await contentResponse.json();
+                  return {
+                    id: result.path || 'unknown',
+                    text: contentData.document?.content || result.path,
+                    score: result.score || 0.95,
+                    metadata: {
+                      timestamp: contentData.document?.created_at || new Date().toISOString(),
+                      recordingId: result.path?.split('_')[1] || 'unknown',
+                      topic: contentData.document?.metadata?.topic || 'Recording'
+                    }
+                  };
+                } else {
+                  // Fallback without content
+                  return {
+                    id: result.path || 'unknown',
+                    text: result.path || 'No content available',
+                    score: result.score || 0.95,
+                    metadata: {
+                      timestamp: new Date().toISOString(),
+                      recordingId: result.path?.split('_')[1] || 'unknown',
+                      topic: 'Recording'
+                    }
+                  };
+                }
+              } catch (error) {
+                console.error(`Error fetching content for ${result.path}:`, error);
+                return {
+                  id: result.path || 'unknown',
+                  text: result.path || 'No content available',
+                  score: result.score || 0.95,
+                  metadata: {
+                    timestamp: new Date().toISOString(),
+                    recordingId: result.path?.split('_')[1] || 'unknown',
+                    topic: 'Recording'
+                  }
+                };
+              }
+            })
+          );
+          
+          return resultsWithContent;
         }
       } else {
         const errorText = await response.text();
