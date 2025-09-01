@@ -70,12 +70,11 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       metadata: {
         timestamp: new Date().toISOString(),
         recordingId: recordingId || 'unknown',
-        audioSize: `${req.file?.size as number}`,
+        audioSize: req.file.size,
         mimeType: req.file.mimetype,
         source: 'mobile-transcription',
         aiTitle: result.title || 'Untitled Recording',
         aiSummary: result.summary || 'No summary available',
-        audioSize: req.file.size, // Store audio size instead of path
       } as any,
     } as any);
 
@@ -120,11 +119,15 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       hasDiarization: result.transcription.includes('Speaker '), // Check if diarization was applied
       durationSeconds: durationSeconds,
     });
-  } catch (error) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    const errorName = error instanceof Error ? error.name : 'UnknownError';
+    
     console.error('Transcription error details:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name,
+      message: errorMessage,
+      stack: errorStack,
+      name: errorName,
       audioFileSize: req.file?.size,
       audioFileMimeType: req.file?.mimetype,
       audioFileName: req.file?.originalname,
@@ -134,7 +137,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
     });
     res.status(500).json({ 
       error: 'Failed to transcribe audio',
-      details: error.message,
+      details: errorMessage,
       hasKeys: {
         openai: !!process.env.OPENAI_API_KEY,
         zeroentropy: !!process.env.ZEROENTROPY_API_KEY
@@ -211,8 +214,9 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
       timestamp: new Date().toISOString(),
       hasDiarization: result.transcription.includes('Speaker '), // Check if diarization was applied
     });
-  } catch (error) {
-    console.error('Batch transcription error:', error);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Batch transcription error:', errorMessage);
     res.status(500).json({ error: 'Failed to transcribe audio chunks' });
   }
 });
