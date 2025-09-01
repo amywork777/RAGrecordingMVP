@@ -61,7 +61,10 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
 
     // Store in ZeroEntropy using REST API (SDK fails in Vercel serverless)
     const collection_name = 'ai-wearable-transcripts';
-    const zePath = `mobile/recordings/${Date.now()}_${(recordingId || 'rec')}.txt`;
+    // Use simpler path format that matches successful documents pattern
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const cleanRecordingId = (recordingId || 'rec').replace(/[^a-zA-Z0-9-]/g, '');
+    const zePath = `recordings/${timestamp}_${cleanRecordingId}.txt`;
     
     const zeResponse = await fetch(`https://api.zeroentropy.dev/v1/documents/add-document`, {
       method: 'POST',
