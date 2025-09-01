@@ -49,9 +49,14 @@ router.get('/transcripts/recent', async (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 10;
     
-    // Use mock data for recent transcripts
-    const mockTranscripts = ZeroEntropySimpleService.getMockTranscripts();
-    const results = mockTranscripts.slice(0, limit);
+    // Get recent transcripts - will try ZeroEntropy API first, fallback to mock
+    const transcripts = await ZeroEntropySimpleService.search('', limit);
+    const results = transcripts.map((t: any) => ({
+      id: t.id,
+      text: t.text,
+      timestamp: t.metadata?.timestamp || new Date().toISOString(),
+      recordingId: t.metadata?.recordingId || 'unknown'
+    }));
     
     const formattedResults = results.map(result => ({
       id: result.id,
