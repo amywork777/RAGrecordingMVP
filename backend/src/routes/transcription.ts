@@ -37,27 +37,8 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       format = 'mp3';
     }
     
-    // Save audio file to disk
-    const audioDir = './audio_files';
-    const yearMonth = new Date().toISOString().substring(0, 7); // YYYY-MM
-    const audioPath = path.join(audioDir, yearMonth);
-    
-    // Create directory if it doesn't exist
-    if (!fs.existsSync(audioPath)) {
-      fs.mkdirSync(audioPath, { recursive: true });
-    }
-    
-    // Generate unique filename
-    const timestamp = Date.now();
-    const audioFileName = `${recordingId || 'rec'}_${timestamp}.${format}`;
-    const fullAudioPath = path.join(audioPath, audioFileName);
-    
-    // Write audio file to disk
-    fs.writeFileSync(fullAudioPath, req.file.buffer);
-    console.log(`Audio file saved to: ${fullAudioPath}`);
-    
-    // Create relative path for URL (assuming files are served from /audio endpoint)
-    const audioUrl = `/audio/${yearMonth}/${audioFileName}`;
+    // Skip file saving on Vercel - use memory buffer directly
+    console.log('Processing audio in memory (Vercel serverless environment)');
     
     const speakers = speakersExpected ? parseInt(speakersExpected) : 2;
     console.log(`Processing audio file: ${req.file.originalname}, format: ${format}, size: ${req.file.size} bytes, speakers: ${speakers}`);
@@ -94,8 +75,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
         source: 'mobile-transcription',
         aiTitle: result.title || 'Untitled Recording',
         aiSummary: result.summary || 'No summary available',
-        audioPath: fullAudioPath, // Store local audio path
-        audioUrl: audioUrl, // Store relative URL
+        audioSize: req.file.size, // Store audio size instead of path
       } as any,
     } as any);
 
@@ -138,8 +118,6 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       recordingId,
       timestamp: new Date().toISOString(),
       hasDiarization: result.transcription.includes('Speaker '), // Check if diarization was applied
-      audioUrl: audioUrl, // Return audio URL for client
-      audioPath: fullAudioPath, // Return local path for reference
       durationSeconds: durationSeconds,
     });
   } catch (error) {
