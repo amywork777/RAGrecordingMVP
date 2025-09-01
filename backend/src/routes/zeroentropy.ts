@@ -44,7 +44,7 @@ router.get('/documents', async (req: Request, res: Response) => {
       throw new Error(`ZeroEntropy API error: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data: any = await response.json();
     const documents = data.documents || [];
     
     // Now fetch content for each document using REST API
@@ -65,7 +65,7 @@ router.get('/documents', async (req: Request, res: Response) => {
           });
 
           if (contentResponse.ok) {
-            const contentData = await contentResponse.json();
+            const contentData: any = await contentResponse.json();
             return contentData.document;
           } else {
             console.error(`Error fetching content for ${doc.path}`);

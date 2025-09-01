@@ -126,13 +126,27 @@ class AudioRecordingService {
         return null;
       }
 
+      console.log('Attempting to read recording URI:', this.recordingUri);
+      
+      // Check if file exists first
+      const fileInfo = await FileSystem.getInfoAsync(this.recordingUri);
+      console.log('File info:', fileInfo);
+      
+      if (!fileInfo.exists) {
+        console.error('Recording file does not exist at URI:', this.recordingUri);
+        return null;
+      }
+
+      console.log('Reading file as base64...');
       const base64 = await FileSystem.readAsStringAsync(this.recordingUri, {
         encoding: FileSystem.EncodingType.Base64,
       });
 
+      console.log('Successfully read base64, length:', base64.length);
       return base64;
     } catch (error) {
       console.error('Failed to get recording data:', error);
+      console.error('Recording URI was:', this.recordingUri);
       return null;
     }
   }

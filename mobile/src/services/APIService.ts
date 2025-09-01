@@ -141,6 +141,8 @@ class APIService {
     
     console.log('Creating FormData with:', { mimeType, filename });
     
+    // Convert base64 to proper file format for React Native
+    // Using proper blob-like structure that React Native FormData can handle
     formData.append('audio', {
       uri: `data:${mimeType};base64,${base64Audio}`,
       type: mimeType,
@@ -152,6 +154,10 @@ class APIService {
     const response = await fetchWithFallback(`${API_BASE_URL}/api/transcribe`, {
       method: 'POST',
       body: formData,
+      headers: {
+        // Let React Native set Content-Type automatically for FormData
+        // Don't set Content-Type manually for multipart/form-data
+      },
     });
 
     console.log('Response status:', response.status);

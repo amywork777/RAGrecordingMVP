@@ -93,7 +93,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
     }
 
     const zeData = await zeResponse.json();
-    console.log('ZeroEntropy add result:', zeData);
+    console.log('ZeroEntropy add result:', zeResponse);
 
     // Fire-and-forget: upsert into Supabase, then write latest AI title/summary
     (async () => {
@@ -177,7 +177,7 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
     const client = getZeroEntropyClient();
     const collection_name = 'ai-wearable-transcripts';
     const path = `mobile/recordings/${Date.now()}_${(recordingId || 'rec')}_batch.txt`;
-    const zeResponse = await client.documents.add({
+    const zeResponseBatch = await client.documents.add({
       collection_name,
       path,
       content: { type: 'text', text: result.transcription },
@@ -198,7 +198,7 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
           const docId = await SupabaseService.upsertDocument({
             ze_collection_name: collection_name,
             ze_path: path,
-            ze_document_id: (zeData as any)?.document?.id || null,
+            ze_document_id: (zeResponseBatch as any)?.document?.id || null,
             recording_id: recordingId || null,
             timestamp: new Date().toISOString(),
             topic: null,
@@ -206,7 +206,7 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
             original_name: null,
             size_bytes: null,
             source: 'mobile-transcription-batch',
-            ze_index_status: (zeData as any)?.document?.index_status || null,
+            ze_index_status: (zeResponseBatch as any)?.document?.index_status || null,
             device_name: null,
             duration_seconds: durationSeconds,
           });
