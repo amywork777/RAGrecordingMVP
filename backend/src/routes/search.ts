@@ -15,14 +15,109 @@ router.post('/search', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Query is required' });
     }
 
-    const searchResults = await ZeroEntropyService.search(query, limit);
+    // Use direct ZeroEntropy REST API for search
+    let searchResults: any[] = [];
+    let answer: string = "I couldn't find any relevant information in your recordings for that query.";
     
-    // Use GPT to generate answer based on search results
-    let answer: string | undefined;
-    if (searchResults.length > 0) {
-      answer = await GPTService.generateAnswer(query, searchResults);
-    } else {
-      answer = "I couldn't find any relevant information in your recordings for that query.";
+    try {
+      const response = await fetch(`https://api.zeroentropy.dev/v1/queries/top-documents`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.ZEROENTROPY_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          collection_name: 'ai-wearable-transcripts',
+          query: query,
+          k: limit || 10,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`[ZeroEntropy Search] Retrieved ${data.results?.length || 0} search results`);
+        
+        if (data.results && data.results.length > 0) {
+          // Fetch actual content for top 3 results for better GPT answers
+          const topResults = data.results.slice(0, 3);
+          const resultsWithContent = await Promise.all(
+            topResults.map(async (result: any) => {
+              try {
+                // Get actual document content
+                const contentResponse = await fetch(`https://api.zeroentropy.dev/v1/documents/get-document-info`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${process.env.ZEROENTROPY_API_KEY}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    collection_name: 'ai-wearable-transcripts',
+                    path: result.path,
+                    include_content: true,
+                  }),
+                });
+
+                if (contentResponse.ok) {
+                  const contentData = await contentResponse.json();
+                  const actualText = contentData.document?.content || result.path;
+                  return {
+                    id: result.id || 'unknown',
+                    text: actualText,
+                    score: result.score || 0.95,
+                    metadata: {
+                      timestamp: result.metadata?.timestamp || new Date().toISOString(),
+                      recordingId: result.metadata?.recordingId || result.path || 'unknown'
+                    }
+                  };
+                } else {
+                  console.warn(`Failed to fetch content for ${result.path}`);
+                  return {
+                    id: result.id || 'unknown',
+                    text: result.path || 'No content available',
+                    score: result.score || 0.95,
+                    metadata: {
+                      timestamp: result.metadata?.timestamp || new Date().toISOString(),
+                      recordingId: result.metadata?.recordingId || result.path || 'unknown'
+                    }
+                  };
+                }
+              } catch (error) {
+                console.error(`Error fetching content for ${result.path}:`, error);
+                return {
+                  id: result.id || 'unknown',
+                  text: result.path || 'No content available',
+                  score: result.score || 0.95,
+                  metadata: {
+                    timestamp: result.metadata?.timestamp || new Date().toISOString(),
+                    recordingId: result.metadata?.recordingId || result.path || 'unknown'
+                  }
+                };
+              }
+            })
+          );
+
+          // Add remaining results without content (for performance)
+          const remainingResults = data.results.slice(3).map((result: any) => ({
+            id: result.id || 'unknown',
+            text: result.path || 'No content available',
+            score: result.score || 0.95,
+            metadata: {
+              timestamp: result.metadata?.timestamp || new Date().toISOString(),
+              recordingId: result.metadata?.recordingId || result.path || 'unknown'
+            }
+          }));
+
+          searchResults = [...resultsWithContent, ...remainingResults];
+          
+          // Generate answer with GPT using actual content from top results
+          answer = await GPTService.generateAnswer(query, resultsWithContent);
+        }
+      } else {
+        const errorText = await response.text();
+        console.error(`[ZeroEntropy Search] API error: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+    } catch (error) {
+      console.error('[ZeroEntropy Search] Failed to search documents:', error);
     }
 
     const formattedResults = searchResults.map(result => ({

@@ -61,54 +61,68 @@ class ZeroEntropyService {
   }
 
   async search(query: string, limit: number = 5): Promise<SearchResult[]> {
-    if (this.useMockData) {
-      const results = await MockDataService.searchTranscripts(query, limit);
-      return results.map(r => ({
-        id: r.id,
-        text: r.text,
-        score: Math.random() * 0.3 + 0.7, // Random score between 0.7-1.0
-        metadata: {
-          timestamp: r.timestamp,
-          recordingId: r.recordingId
-        }
-      }));
-    }
-
     try {
-      const response = await fetch(`${this.baseUrl}/projects/${this.projectId}/search`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query,
-          limit,
-          include_metadata: true,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`ZeroEntropy API error: ${response.statusText}`);
+      let response: Response;
+      
+      if (query && query.trim()) {
+        // Use search endpoint for queries
+        console.log(`[ZeroEntropyService] Searching documents for query: "${query}"`);
+        response = await fetch(`https://api.zeroentropy.dev/v1/queries/top-documents`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            collection_name: 'ai-wearable-transcripts',
+            query: query,
+            k: limit || 10,
+          }),
+        });
+      } else {
+        // Use document list endpoint for recent transcripts (no query)
+        console.log(`[ZeroEntropyService] Fetching recent documents`);
+        response = await fetch(`https://api.zeroentropy.dev/v1/documents/get-document-info-list`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            collection_name: 'ai-wearable-transcripts',
+            limit: limit || 100,
+            path_prefix: null,
+            path_gt: null,
+          }),
+        });
       }
 
-      const data: any = await response.json();
-      return data.results;
-    } catch (error) {
-      console.error('Error searching in ZeroEntropy:', error);
-      console.log('Using mock data for search...');
-      
-      const results = await MockDataService.searchTranscripts(query, limit);
-      return results.map(r => ({
-        id: r.id,
-        text: r.text,
-        score: Math.random() * 0.3 + 0.7,
-        metadata: {
-          timestamp: r.timestamp,
-          recordingId: r.recordingId
+      if (response.ok) {
+        const data: any = await response.json();
+        console.log(`[ZeroEntropyService] Retrieved ${data.documents?.length || 0} real documents`);
+        
+        if (data.documents && data.documents.length > 0) {
+          return data.documents.map((doc: any) => ({
+            id: doc.id || 'unknown',
+            text: doc.path || doc.text || 'No content available', // Use path for now since content isn't directly available
+            score: doc.score || 0.95, // Use score from search, or high score for list
+            metadata: {
+              timestamp: doc.created_at || doc.metadata?.timestamp || new Date().toISOString(),
+              recordingId: doc.metadata?.recordingId || doc.path || doc.id || 'unknown'
+            }
+          }));
         }
-      }));
+      } else {
+        const errorText = await response.text();
+        console.error(`[ZeroEntropyService] API error: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+    } catch (error) {
+      console.error('[ZeroEntropyService] Failed to fetch real documents:', error);
     }
+    
+    // If real API fails, return empty instead of mock data
+    console.log(`[ZeroEntropyService] No real documents retrieved - returning empty results`);
+    return [];
   }
 
   async generateAnswer(query: string, context: SearchResult[]): Promise<string> {

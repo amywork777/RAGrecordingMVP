@@ -52,11 +52,69 @@ class ZeroEntropySimpleService {
   }
 
   async search(query: string, limit: number = 5): Promise<SearchResult[]> {
-    // When mock data is disabled, return empty results
-    // This prevents animal mock data from appearing in the app
+    // When mock data is disabled, try to get real documents from ZeroEntropy API
     if (!this.useMockData && this.apiKey) {
-      console.log(`[ZeroEntropy] Mock data disabled - returning empty results until real documents are available`);
-      console.log(`[ZeroEntropy] Query: "${query}", limit: ${limit}`);
+      try {
+        let response: Response;
+        
+        if (query && query.trim()) {
+          // Use search endpoint for queries
+          console.log(`[ZeroEntropy] Searching documents for query: "${query}"`);
+          response = await fetch(`https://api.zeroentropy.dev/v1/queries/top-documents`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              collection_name: 'ai-wearable-transcripts',
+              query: query,
+              k: limit || 10,
+            }),
+          });
+        } else {
+          // Use document list endpoint for recent transcripts (no query)
+          console.log(`[ZeroEntropy] Fetching recent documents`);
+          response = await fetch(`https://api.zeroentropy.dev/v1/documents/get-document-info-list`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              collection_name: 'ai-wearable-transcripts',
+              limit: limit || 100,
+              path_prefix: null,
+              path_gt: null,
+            }),
+          });
+        }
+
+        if (response.ok) {
+          const data: any = await response.json();
+          console.log(`[ZeroEntropy] Retrieved ${data.documents?.length || 0} real documents`);
+          
+          if (data.documents && data.documents.length > 0) {
+            return data.documents.map((doc: any) => ({
+              id: doc.id || 'unknown',
+              text: doc.path || doc.text || 'No content available', // Use path for now since content isn't directly available
+              score: doc.score || 0.95, // Use score from search, or high score for list
+              metadata: {
+                timestamp: doc.created_at || doc.metadata?.timestamp || new Date().toISOString(),
+                recordingId: doc.metadata?.recordingId || doc.path || doc.id || 'unknown'
+              }
+            }));
+          }
+        } else {
+          const errorText = await response.text();
+          console.error(`[ZeroEntropy] API error: ${response.status} ${response.statusText} - ${errorText}`);
+        }
+      } catch (error) {
+        console.error('[ZeroEntropy] Failed to fetch real documents:', error);
+      }
+      
+      // If real API fails, return empty instead of mock data
+      console.log(`[ZeroEntropy] No real documents retrieved - returning empty results`);
       return [];
     }
     

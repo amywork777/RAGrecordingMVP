@@ -59,26 +59,41 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
 
     console.log('Transcription result (first 100):', result.transcription.substring(0, 100) + '...');
 
-    // Store in ZeroEntropy using SDK so we get the ZE path/id for Supabase
-    const client = getZeroEntropyClient();
+    // Store in ZeroEntropy using REST API (SDK fails in Vercel serverless)
     const collection_name = 'ai-wearable-transcripts';
     const zePath = `mobile/recordings/${Date.now()}_${(recordingId || 'rec')}.txt`;
-    const zeResponse = await client.documents.add({
-      collection_name,
-      path: zePath,
-      content: { type: 'text', text: result.transcription },
-      metadata: {
-        timestamp: new Date().toISOString(),
-        recordingId: recordingId || 'unknown',
-        audioSize: req.file.size,
-        mimeType: req.file.mimetype,
-        source: 'mobile-transcription',
-        aiTitle: result.title || 'Untitled Recording',
-        aiSummary: result.summary || 'No summary available',
-      } as any,
-    } as any);
+    
+    const zeResponse = await fetch(`https://api.zeroentropy.dev/v1/documents/add-document`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.ZEROENTROPY_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        collection_name,
+        path: zePath,
+        content: { type: 'text', text: result.transcription },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          recordingId: recordingId || 'unknown',
+          audioSize: req.file.size,
+          mimeType: req.file.mimetype,
+          source: 'mobile-transcription',
+          aiTitle: result.title || 'Untitled Recording',
+          aiSummary: result.summary || 'No summary available',
+        },
+        overwrite: false,
+      }),
+    });
 
-    console.log('ZeroEntropy add result:', zeResponse);
+    if (!zeResponse.ok) {
+      const errorText = await zeResponse.text();
+      console.error(`ZeroEntropy save failed: ${zeResponse.status} ${zeResponse.statusText} - ${errorText}`);
+      throw new Error(`Failed to save transcription to ZeroEntropy: ${zeResponse.statusText}`);
+    }
+
+    const zeData = await zeResponse.json();
+    console.log('ZeroEntropy add result:', zeData);
 
     // Fire-and-forget: upsert into Supabase, then write latest AI title/summary
     (async () => {
@@ -87,7 +102,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
           const docId = await SupabaseService.upsertDocument({
             ze_collection_name: collection_name,
             ze_path: zePath,
-            ze_document_id: (zeResponse as any)?.document?.id || null,
+            ze_document_id: (zeData as any)?.document?.id || null,
             recording_id: recordingId || null,
             timestamp: new Date().toISOString(),
             topic: null,
@@ -95,7 +110,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
             original_name: req.file?.originalname || null,
             size_bytes: (req.file?.size as number) || null,
             source: 'mobile-transcription',
-            ze_index_status: (zeResponse as any)?.document?.index_status || null,
+            ze_index_status: (zeData as any)?.document?.index_status || null,
             device_name: null,
             duration_seconds: durationSeconds,
           });
@@ -183,7 +198,7 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
           const docId = await SupabaseService.upsertDocument({
             ze_collection_name: collection_name,
             ze_path: path,
-            ze_document_id: (zeResponse as any)?.document?.id || null,
+            ze_document_id: (zeData as any)?.document?.id || null,
             recording_id: recordingId || null,
             timestamp: new Date().toISOString(),
             topic: null,
@@ -191,7 +206,7 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
             original_name: null,
             size_bytes: null,
             source: 'mobile-transcription-batch',
-            ze_index_status: (zeResponse as any)?.document?.index_status || null,
+            ze_index_status: (zeData as any)?.document?.index_status || null,
             device_name: null,
             duration_seconds: durationSeconds,
           });

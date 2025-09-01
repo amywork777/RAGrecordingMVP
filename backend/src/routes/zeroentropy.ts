@@ -22,25 +22,55 @@ const getZeroEntropyClient = () => {
 router.get('/documents', async (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 50;
-    const client = getZeroEntropyClient();
     
-    console.log('Fetching documents from ZeroEntropy...');
+    console.log('Fetching documents from ZeroEntropy using REST API...');
     
-    const documents = await client.documents.getInfoList({
-      collection_name: 'ai-wearable-transcripts',
-      limit: limit,
+    // Use REST API instead of SDK to avoid connection issues
+    const response = await fetch(`https://api.zeroentropy.dev/v1/documents/get-document-info-list`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.ZEROENTROPY_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        collection_name: 'ai-wearable-transcripts',
+        limit: limit,
+        path_prefix: null,
+        path_gt: null,
+      }),
     });
+
+    if (!response.ok) {
+      throw new Error(`ZeroEntropy API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const documents = data.documents || [];
     
-    // Now fetch content for each document
+    // Now fetch content for each document using REST API
     const docsWithContent = await Promise.all(
-      ((documents as any).documents || []).map(async (doc: any) => {
+      documents.map(async (doc: any) => {
         try {
-          const docInfo = await client.documents.getInfo({
-            collection_name: 'ai-wearable-transcripts',
-            path: doc.path,
-            include_content: true,
+          const contentResponse = await fetch(`https://api.zeroentropy.dev/v1/documents/get-document-info`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.ZEROENTROPY_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              collection_name: 'ai-wearable-transcripts',
+              path: doc.path,
+              include_content: true,
+            }),
           });
-          return (docInfo as any).document;
+
+          if (contentResponse.ok) {
+            const contentData = await contentResponse.json();
+            return contentData.document;
+          } else {
+            console.error(`Error fetching content for ${doc.path}`);
+            return doc;
+          }
         } catch (error) {
           console.error(`Error fetching content for ${doc.path}:`, error);
           return doc;
@@ -297,26 +327,42 @@ Respond in JSON format:
       }
     }
 
-    const response = await client.documents.add({
-      collection_name,
-      path,
-      content: {
-        type: 'text',
-        text,
+    // Use REST API instead of SDK to avoid connection issues in Vercel
+    const response = await fetch(`https://api.zeroentropy.dev/v1/documents/add-document`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.ZEROENTROPY_API_KEY}`,
+        'Content-Type': 'application/json',
       },
-      metadata: {
-        timestamp: new Date().toISOString(),
-        aiTitle: aiTitle || 'Untitled',
-        aiSummary: aiSummary || 'No summary available',
-        ...metadata,
-      } as any,
-    } as any);
+      body: JSON.stringify({
+        collection_name,
+        path,
+        content: {
+          type: 'text',
+          text,
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          aiTitle: aiTitle || 'Untitled',
+          aiSummary: aiSummary || 'No summary available',
+          ...metadata,
+        },
+        overwrite: false,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`ZeroEntropy API error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    const responseData = await response.json();
     
-    console.log('Document successfully uploaded to ZeroEntropy:', response);
+    console.log('Document successfully uploaded to ZeroEntropy:', responseData);
 
     res.json({
       message: 'Document uploaded to ZeroEntropy',
-      response,
+      response: responseData,
       path,
       collection_name,
       textLength: text.length,
