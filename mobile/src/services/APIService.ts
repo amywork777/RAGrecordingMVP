@@ -39,7 +39,7 @@ function deriveDefaultBaseUrl(): string {
   return 'http://localhost:3000';
 }
 
-const API_BASE_URL = 'http://192.168.1.16:3000'; // CURRENT WIFI IP
+const API_BASE_URL = deriveDefaultBaseUrl();
 // Helpful log to verify at runtime
 // eslint-disable-next-line no-console
 console.log('API base URL:', API_BASE_URL);
