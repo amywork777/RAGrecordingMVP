@@ -22,7 +22,7 @@ class ZeroEntropyService {
   private apiKey: string;
   private projectId: string;
   private baseUrl = 'https://api.zeroentropy.ai/v1';
-  private useMockData = true; // Toggle for testing
+  private useMockData = false; // Toggle for testing - Set to false to use real ZeroEntropy API
 
   constructor() {
     this.apiKey = process.env.ZEROENTROPY_API_KEY || '';
