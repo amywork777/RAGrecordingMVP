@@ -86,14 +86,19 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       }),
     });
 
+    let zeData = null;
+    let zeroEntropySuccess = false;
+    
     if (!zeResponse.ok) {
       const errorText = await zeResponse.text();
       console.error(`ZeroEntropy save failed: ${zeResponse.status} ${zeResponse.statusText} - ${errorText}`);
-      throw new Error(`Failed to save transcription to ZeroEntropy: ${zeResponse.statusText}`);
+      console.log('Continuing without ZeroEntropy save - transcription will still work');
+      // Don't throw error - continue with transcription response
+    } else {
+      zeData = await zeResponse.json();
+      zeroEntropySuccess = true;
+      console.log('ZeroEntropy save successful:', zeResponse.status);
     }
-
-    const zeData = await zeResponse.json();
-    console.log('ZeroEntropy add result:', zeResponse);
 
     // Fire-and-forget: upsert into Supabase, then write latest AI title/summary
     (async () => {
@@ -133,6 +138,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       timestamp: new Date().toISOString(),
       hasDiarization: result.transcription.includes('Speaker '), // Check if diarization was applied
       durationSeconds: durationSeconds,
+      zeroEntropyStatus: zeroEntropySuccess ? 'success' : 'failed',
     });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
