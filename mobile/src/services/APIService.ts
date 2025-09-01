@@ -3,16 +3,26 @@ import { Platform } from 'react-native';
 
 function deriveDefaultBaseUrl(): string {
   // Production backend URL for all non-development cases
-  const PRODUCTION_URL = 'https://backend-9ro6l61e4-amy-zhous-projects-45e75853.vercel.app';
+  const PRODUCTION_URL = 'https://backend-6gfvf8yeb-amy-zhous-projects-45e75853.vercel.app';
+  
+  console.log('=== API URL DERIVATION DEBUG ===');
+  console.log('process.env.EXPO_PUBLIC_API_URL:', process.env.EXPO_PUBLIC_API_URL);
+  console.log('Constants.executionEnvironment:', Constants.executionEnvironment);
+  console.log('Constants.appOwnership:', Constants.appOwnership);
+  console.log('__DEV__:', __DEV__);
   
   // 1) Respect explicit config if provided
   if (process.env.EXPO_PUBLIC_API_URL) {
+    console.log('Using EXPO_PUBLIC_API_URL:', process.env.EXPO_PUBLIC_API_URL);
     return process.env.EXPO_PUBLIC_API_URL;
   }
 
-  // 2) For production builds (TestFlight/App Store)
+  // 2) For production builds (TestFlight/App Store) - EXPANDED CONDITIONS
   if (Constants.executionEnvironment === 'storeClient' || 
-      (Constants.executionEnvironment === 'standalone' && Constants.appOwnership !== 'expo')) {
+      Constants.executionEnvironment === 'standalone' ||
+      Constants.appOwnership === 'standalone' ||
+      !__DEV__) {
+    console.log('Using PRODUCTION_URL due to build environment:', PRODUCTION_URL);
     return PRODUCTION_URL;
   }
 
@@ -52,7 +62,7 @@ console.log('__DEV__:', __DEV__);
 
 // Fallback URL helper
 async function fetchWithFallback(url: string, options: RequestInit): Promise<Response> {
-  const PRODUCTION_URL = 'https://backend-9ro6l61e4-amy-zhous-projects-45e75853.vercel.app';
+  const PRODUCTION_URL = 'https://backend-6gfvf8yeb-amy-zhous-projects-45e75853.vercel.app';
   const LOCAL_URL = 'http://localhost:3000';
   
   try {
