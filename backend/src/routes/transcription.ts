@@ -143,8 +143,25 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       durationSeconds: durationSeconds,
     });
   } catch (error) {
-    console.error('Transcription error:', error);
-    res.status(500).json({ error: 'Failed to transcribe audio' });
+    console.error('Transcription error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      audioFileSize: req.file?.size,
+      audioFileMimeType: req.file?.mimetype,
+      audioFileName: req.file?.originalname,
+      recordingId: req.body?.recordingId,
+      hasOpenAIKey: !!process.env.OPENAI_API_KEY,
+      hasZeroEntropyKey: !!process.env.ZEROENTROPY_API_KEY,
+    });
+    res.status(500).json({ 
+      error: 'Failed to transcribe audio',
+      details: error.message,
+      hasKeys: {
+        openai: !!process.env.OPENAI_API_KEY,
+        zeroentropy: !!process.env.ZEROENTROPY_API_KEY
+      }
+    });
   }
 });
 
