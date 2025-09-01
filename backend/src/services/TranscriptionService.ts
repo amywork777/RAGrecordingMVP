@@ -196,19 +196,21 @@ class TranscriptionService {
   // Active Whisper fallback method
   private async transcribeWithWhisper(audioBuffer: Buffer, format: string = 'wav'): Promise<string> {
     try {
-      const tempDir = './temp';
-      if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+      // Use buffer directly for Vercel serverless (no temp file creation)
       const fileExt = format === 'wav' ? 'wav' : 'm4a';
-      const tempFilePath = path.join(tempDir, `audio_${Date.now()}.${fileExt}`);
-      fs.writeFileSync(tempFilePath, audioBuffer);
+      const fileName = `audio_${Date.now()}.${fileExt}`;
+      
+      // Create a File-like object from buffer for OpenAI API
+      const file = new File([audioBuffer], fileName, {
+        type: format === 'wav' ? 'audio/wav' : 'audio/m4a'
+      });
 
       const transcription = await this.openai.audio.transcriptions.create({
-        file: fs.createReadStream(tempFilePath),
+        file: file,
         model: 'whisper-1',
         language: 'en',
       });
 
-      try { fs.unlinkSync(tempFilePath); } catch {}
       return transcription.text;
     } catch (error: any) {
       console.error('Error transcribing audio with Whisper:', error);
