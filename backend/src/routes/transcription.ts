@@ -79,13 +79,10 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
         metadata: {
           timestamp: new Date().toISOString(),
           recordingId: recordingId || 'unknown',
-          audioSize: req.file.size,
-          mimeType: req.file.mimetype,
           source: 'mobile-transcription',
-          aiTitle: result.title || 'Untitled Recording',
-          aiSummary: result.summary || 'No summary available',
+          topic: 'Recording',
         },
-        overwrite: false,
+        // Try without overwrite parameter which might not be supported
       }),
     });
 
