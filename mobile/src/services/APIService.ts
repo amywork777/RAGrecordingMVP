@@ -16,11 +16,7 @@ function deriveDefaultBaseUrl(): string {
     return PRODUCTION_URL;
   }
 
-  // 3) FORCE CORRECT IP - Backend is running on hotspot
-  console.log('FORCED: Using backend at 172.20.10.2:3000');
-  return 'http://172.20.10.2:3000';
-
-  // 4) For development - use Metro host IP for backend
+  // 3) For development - use Metro host IP for backend
   try {
     const anyConstants: any = Constants as any;
     const hostUri: string | undefined =
