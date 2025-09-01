@@ -11,11 +11,15 @@ function deriveDefaultBaseUrl(): string {
   console.log('Constants.appOwnership:', Constants.appOwnership);
   console.log('__DEV__:', __DEV__);
   
-  // 1) Respect explicit config if provided
-  if (process.env.EXPO_PUBLIC_API_URL) {
-    console.log('Using EXPO_PUBLIC_API_URL:', process.env.EXPO_PUBLIC_API_URL);
-    return process.env.EXPO_PUBLIC_API_URL;
-  }
+  // 1) FORCE CORRECT BACKEND - Override environment variable that's pointing to wrong URL
+  console.log('FORCED: Using correct working backend URL');
+  return PRODUCTION_URL;
+  
+  // 1) Respect explicit config if provided (DISABLED - env var has wrong URL)
+  // if (process.env.EXPO_PUBLIC_API_URL) {
+  //   console.log('Using EXPO_PUBLIC_API_URL:', process.env.EXPO_PUBLIC_API_URL);
+  //   return process.env.EXPO_PUBLIC_API_URL;
+  // }
 
   // 2) For production builds (TestFlight/App Store) - EXPANDED CONDITIONS
   if (Constants.executionEnvironment === 'storeClient' || 
