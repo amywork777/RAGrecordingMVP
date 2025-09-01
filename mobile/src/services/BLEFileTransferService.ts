@@ -1,6 +1,7 @@
 import { BleManager, Device, Characteristic, BleError } from 'react-native-ble-plx';
 import { Buffer } from 'buffer';
 import { Platform } from 'react-native';
+import ADPCMDecoder from './ADPCMDecoder';
 
 interface FileInfo {
   size: number;
@@ -75,20 +76,18 @@ class BLEFileTransferService {
           }
 
           if (device) {
-            // Only log relevant devices to reduce noise
+            // Only process and log XIAO devices - completely ignore others
             if (device.name === 'XIAO-REC' || 
                 device.name?.includes('XIAO') || 
                 device.name?.includes('REC')) {
               
               if (!deviceMap.has(device.id)) {
-                console.log(`BLE: ✓ Found XIAO device: ${device.name} (${device.id})`);
+                console.log(`🎙️ XIAO Device Found: ${device.name} (${device.id})`);
                 deviceMap.set(device.id, device);
                 devices.push(device);
               }
-            } else if (device.name) {
-              // Only log named devices that aren't our target (reduces "Unknown" spam)
-              console.log(`BLE: Found other device: ${device.name}`);
             }
+            // Silently ignore all other devices
           }
         }
       );
@@ -632,6 +631,130 @@ class BLEFileTransferService {
 
   isConnected(): boolean {
     return this.device !== null;
+  }
+
+  /**
+   * Process downloaded audio file - handles both ADPCM and WAV formats
+   * @param rawData Raw file data from BLE device
+   * @returns Processed audio data ready for playback/upload
+   */
+  processAudioFile(rawData: Uint8Array): {
+    audioData: Uint8Array;
+    format: 'ADPCM' | 'WAV';
+    info: {
+      originalSize: number;
+      processedSize: number;
+      sampleRate: number;
+      channels: number;
+      duration: number;
+    }
+  } | null {
+    try {
+      const originalSize = rawData.length;
+      
+      // Debug: Check file header
+      const headerBytes = Array.from(rawData.slice(0, 8)).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(' ');
+      console.log(`🔍 File header bytes: ${headerBytes}`);
+      
+      // Check if it's ADPCM format (by magic bytes or filename)
+      const isADPCMByMagic = ADPCMDecoder.isADPCMFormat(rawData);
+      const isADPCMByFilename = fileInfo.name.toLowerCase().includes('.adpcm');
+      console.log(`🔍 ADPCM detection - Magic: ${isADPCMByMagic}, Filename: ${isADPCMByFilename}`);
+      
+      if (isADPCMByMagic || isADPCMByFilename) {
+        console.log('🎵 BLE: Detected ADPCM format, decoding...');
+        
+        const decodedWAV = ADPCMDecoder.decodeADPCMToWAV(rawData);
+        if (!decodedWAV) {
+          console.error('BLE: Failed to decode ADPCM to WAV');
+          return null;
+        }
+        
+        const audioInfo = ADPCMDecoder.getAudioInfo(decodedWAV);
+        
+        console.log(`🎵 BLE: ADPCM decoded successfully:`);
+        console.log(`   - Original size: ${originalSize} bytes`);
+        console.log(`   - Decoded size: ${decodedWAV.length} bytes`);
+        console.log(`   - Compression ratio: ${(originalSize / decodedWAV.length * 100).toFixed(1)}%`);
+        console.log(`   - Duration: ${audioInfo.duration.toFixed(1)}s`);
+        
+        return {
+          audioData: decodedWAV,
+          format: 'ADPCM',
+          info: {
+            originalSize,
+            processedSize: decodedWAV.length,
+            sampleRate: audioInfo.sampleRate,
+            channels: audioInfo.channels,
+            duration: audioInfo.duration
+          }
+        };
+      } else {
+        // Assume WAV format for backward compatibility
+        console.log('🎵 BLE: Detected WAV format, using directly');
+        
+        return {
+          audioData: rawData,
+          format: 'WAV',
+          info: {
+            originalSize,
+            processedSize: originalSize,
+            sampleRate: 16000, // Assume 16kHz for existing WAV files
+            channels: 1,       // Assume mono
+            duration: 0        // Would need WAV header parsing for exact duration
+          }
+        };
+      }
+    } catch (error) {
+      console.error('BLE: Error processing audio file:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Download and process audio file in one step
+   * @param onProgress Progress callback
+   * @returns Processed audio data ready for use
+   */
+  async downloadAndProcessAudioFile(
+    onProgress?: (percent: number) => void
+  ): Promise<{
+    audioData: Uint8Array;
+    format: 'ADPCM' | 'WAV';
+    fileInfo: FileInfo;
+    audioInfo: {
+      originalSize: number;
+      processedSize: number;
+      sampleRate: number;
+      channels: number;
+      duration: number;
+    }
+  } | null> {
+    try {
+      // Get file info first
+      const fileInfo = await this.readFileInfo();
+      console.log(`🎵 BLE: Starting download of ${fileInfo.name} (${fileInfo.size} bytes)`);
+      
+      // Download raw file data
+      const rawData = await this.downloadFile(onProgress);
+      
+      // Process the audio file (ADPCM decode if needed)
+      const processed = this.processAudioFile(rawData);
+      if (!processed) {
+        throw new Error('Failed to process audio file');
+      }
+      
+      return {
+        audioData: processed.audioData,
+        format: processed.format,
+        fileInfo,
+        audioInfo: processed.info
+      };
+      
+    } catch (error) {
+      console.error('BLE: Error downloading and processing audio file:', error);
+      return null;
+    }
   }
 
   getDeviceInfo(): { name: string; id: string } | null {

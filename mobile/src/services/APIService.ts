@@ -4,48 +4,46 @@ import { Platform } from 'react-native';
 function deriveDefaultBaseUrl(): string {
   // Production backend URL for all non-development cases
   const PRODUCTION_URL = 'https://backend-iy3pj7fnq-amy-zhous-projects-45e75853.vercel.app';
-  const LOCAL_URL = 'http://localhost:3000';
   
   // 1) Respect explicit config if provided
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
   }
 
-  // 2) Try to infer host from Expo (works in Expo Go and dev builds)
+  // 2) For production builds (TestFlight/App Store)
+  if (Constants.executionEnvironment === 'storeClient' || 
+      (Constants.executionEnvironment === 'standalone' && Constants.appOwnership !== 'expo')) {
+    return PRODUCTION_URL;
+  }
+
+  // 3) FORCE CORRECT IP - Backend is running on hotspot
+  console.log('FORCED: Using backend at 172.20.10.2:3000');
+  return 'http://172.20.10.2:3000';
+
+  // 4) For development - use Metro host IP for backend
   try {
     const anyConstants: any = Constants as any;
     const hostUri: string | undefined =
       anyConstants?.expoConfig?.hostUri ||
       anyConstants?.manifest2?.extra?.expoGo?.hostUri ||
       anyConstants?.manifest?.debuggerHost;
+    
     if (hostUri && typeof hostUri === 'string') {
       const host = hostUri.split(':')[0];
+      console.log('Detected Metro host:', host);
+      // Use the same network IP as Metro for backend
       return `http://${host}:3000`;
     }
-  } catch {}
-
-  // 3) For development builds, try production first with fallback to local
-  if (Constants.executionEnvironment === 'storeClient' || 
-      (Constants.executionEnvironment === 'standalone' && Constants.appOwnership !== 'expo')) {
-    // This is a production build (TestFlight/App Store)
-    return PRODUCTION_URL;
+  } catch (error) {
+    console.log('Failed to detect Metro host:', error);
   }
 
-  // 4) For development builds and Expo Go, prefer local if available, fallback to production
-  const isDevelopment = __DEV__ || 
-                       Constants.executionEnvironment !== 'standalone' || 
-                       Constants.appOwnership === 'expo';
-  
-  if (isDevelopment) {
-    // In development, we'll try local first in the API calls with fallback
-    return LOCAL_URL;
-  }
-
-  // 5) Default fallback to production
-  return PRODUCTION_URL;
+  // 5) Fallback to localhost for development
+  console.log('Using localhost fallback');
+  return 'http://localhost:3000';
 }
 
-const API_BASE_URL = deriveDefaultBaseUrl();
+const API_BASE_URL = 'http://192.168.1.16:3000'; // CURRENT WIFI IP
 // Helpful log to verify at runtime
 // eslint-disable-next-line no-console
 console.log('API base URL:', API_BASE_URL);

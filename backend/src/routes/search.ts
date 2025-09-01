@@ -50,8 +50,8 @@ router.get('/transcripts/recent', async (req: Request, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 10;
     
     // Use mock data for recent transcripts
-    // Return empty - use ZeroEntropy endpoint instead
-    const results: any[] = [];
+    const mockTranscripts = ZeroEntropySimpleService.getMockTranscripts();
+    const results = mockTranscripts.slice(0, limit);
     
     const formattedResults = results.map(result => ({
       id: result.id,

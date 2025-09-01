@@ -26,7 +26,7 @@ import DeepLinkService from '../services/DeepLinkService';
 import uuid from 'react-native-uuid';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
-import * as SecureStore from 'expo-secure-store';
+import SecureStorageService from '../services/SecureStorageService';
 import { Buffer } from 'buffer';
 import { useTheme, spacing, borderRadius, typography, shadows } from '../theme/colors';
 
@@ -81,8 +81,8 @@ export default function RecordScreen({ route }: any) {
   const [syncProgress, setSyncProgress] = useState(0);
   const [showUploadOptions, setShowUploadOptions] = useState(false);
   
-  // Auto-scanning states
-  const [autoScanEnabled, setAutoScanEnabled] = useState(false);
+  // Auto-scanning states - always enabled
+  const [autoScanEnabled, setAutoScanEnabled] = useState(true);
   const [isAutoScanning, setIsAutoScanning] = useState(false);
   const [lastAutoScanTime, setLastAutoScanTime] = useState<Date | null>(null);
   const [autoScanInterval, setAutoScanInterval] = useState<NodeJS.Timeout | null>(null);
@@ -163,28 +163,31 @@ export default function RecordScreen({ route }: any) {
       console.log('App state changed:', appState, '->', nextAppState);
       setAppState(nextAppState);
       
-      if (nextAppState === 'active' && autoScanEnabled) {
-        // App became active and auto-scan is enabled, start scanning
-        console.log('App became active, starting auto-scan');
+      // Log background transition for debugging
+      if (nextAppState.match(/inactive|background/)) {
+        console.log('App backgrounded - relying on iOS background modes for BLE scanning');
+      } else if (nextAppState === 'active') {
+        console.log('App foregrounded - full scanning capabilities restored');
+      }
+      
+      // Always keep auto-scanning running in all states if enabled
+      if (autoScanEnabled && !autoScanInterval) {
+        console.log('Auto-scan enabled, maintaining continuous scanning');
         startAutoScan();
-      } else if (nextAppState !== 'active') {
-        // App went to background/inactive, stop auto-scanning
-        console.log('App went to background, stopping auto-scan');
-        stopAutoScan();
       }
     };
 
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription?.remove();
-  }, [autoScanEnabled, appState]);
+  }, [autoScanEnabled, appState, autoScanInterval]);
 
-  // Manage auto-scan interval
+  // Manage auto-scan interval - runs in all app states
   useEffect(() => {
-    if (autoScanEnabled && appState === 'active' && !isScanning && !isSyncing) {
-      console.log('Starting auto-scan interval');
+    if (autoScanEnabled && !isScanning && !isSyncing) {
+      console.log('Starting continuous auto-scan (all app states)');
       startAutoScan();
-    } else {
-      console.log('Stopping auto-scan interval');
+    } else if (!autoScanEnabled) {
+      console.log('Stopping auto-scan (disabled by user)');
       stopAutoScan();
     }
 
@@ -193,7 +196,7 @@ export default function RecordScreen({ route }: any) {
         clearInterval(autoScanInterval);
       }
     };
-  }, [autoScanEnabled, appState, isScanning, isSyncing]);
+  }, [autoScanEnabled, isScanning, isSyncing]);
 
   // Handle navigation from Chat screen
   useEffect(() => {
@@ -722,23 +725,33 @@ export default function RecordScreen({ route }: any) {
     console.log('Connected to device, reading file info...');
     
     try {
-      // Get file info
-      const fileInfo = await BLEFileTransferService.readFileInfo();
-      console.log(`File to download: ${fileInfo.name} (${fileInfo.size} bytes)`);
-      
-      // Download file with progress updates
-      const wavData = await BLEFileTransferService.downloadFile((percent) => {
+      // Download and process audio file (handles ADPCM/WAV automatically)
+      const result = await BLEFileTransferService.downloadAndProcessAudioFile((percent) => {
         setSyncProgress(percent);
       });
       
-      console.log(`Downloaded ${wavData.length} bytes`);
+      if (!result) {
+        Alert.alert('Download Failed', 'Could not download or process audio file from device.');
+        return;
+      }
       
-      // Validate WAV file size
-      if (wavData.length < 1000) {
-        Alert.alert('Transfer Incomplete', `WAV file too small: ${wavData.length} bytes. Expected at least 10KB for audio recording.`);
-        console.warn(`WAV transfer may be incomplete: ${wavData.length} bytes`);
+      const { audioData, format, fileInfo, audioInfo } = result;
+      
+      console.log(`🎵 Downloaded and processed ${fileInfo.name}:`);
+      console.log(`   - Format: ${format}`);
+      console.log(`   - Original size: ${audioInfo.originalSize} bytes`);
+      console.log(`   - Processed size: ${audioInfo.processedSize} bytes`);
+      console.log(`   - Duration: ${audioInfo.duration.toFixed(1)}s`);
+      if (format === 'ADPCM') {
+        console.log(`   - Compression ratio: ${(audioInfo.originalSize / audioInfo.processedSize * 100).toFixed(1)}%`);
+      }
+      
+      // Validate processed audio file size
+      if (audioData.length < 1000) {
+        Alert.alert('Transfer Incomplete', `Audio file too small: ${audioData.length} bytes. Expected at least 10KB for audio recording.`);
+        console.warn(`Audio transfer may be incomplete: ${audioData.length} bytes`);
       } else {
-        console.log(`WAV file size looks good: ${(wavData.length / 1024).toFixed(1)} KB`);
+        console.log(`Audio file size looks good: ${(audioData.length / 1024).toFixed(1)} KB`);
       }
       
       // Create organized storage structure
@@ -765,14 +778,14 @@ export default function RecordScreen({ route }: any) {
       const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
       const wavPath = `${monthDir}${recordingId}_${sanitizedFileName}`;
       
-      // Save WAV file to organized location
+      // Save processed audio file to organized location
       await FileSystem.writeAsStringAsync(
         wavPath,
-        Buffer.from(wavData).toString('base64'),
+        Buffer.from(audioData).toString('base64'),
         { encoding: FileSystem.EncodingType.Base64 }
       );
       
-      console.log(`WAV file saved to: ${wavPath}`);
+      console.log(`Audio file saved to: ${wavPath}`);
       
       // Process through transcription pipeline
       const formData = new FormData();
@@ -784,21 +797,21 @@ export default function RecordScreen({ route }: any) {
       formData.append('recordingId', recordingId);
       
       console.log('Starting transcription...');
-      const result = await APIService.transcribeAudio(formData);
+      const transcriptionResult = await APIService.transcribeAudio(formData);
       
       // Add to transcripts list with local audio path
       const newTranscript: Transcript = {
         id: recordingId,
-        text: result.text || '[No speech detected]',
+        text: transcriptionResult.text || '[No speech detected]',
         timestamp: new Date(),
-        title: result.aiTitle,
-        summary: result.aiSummary,
-        aiTitle: result.aiTitle,
-        aiSummary: result.aiSummary,
-        durationSeconds: result.durationSeconds,
-        path: result.path,
+        title: transcriptionResult.aiTitle,
+        summary: transcriptionResult.aiSummary,
+        aiTitle: transcriptionResult.aiTitle,
+        aiSummary: transcriptionResult.aiSummary,
+        durationSeconds: transcriptionResult.durationSeconds,
+        path: transcriptionResult.path,
         localAudioPath: wavPath, // Store local WAV path
-        remoteAudioUrl: result.audioUrl, // Store remote URL if provided
+        remoteAudioUrl: transcriptionResult.audioUrl, // Store remote URL if provided
         source: 'ble', // Mark as BLE source
       };
       
@@ -809,7 +822,7 @@ export default function RecordScreen({ route }: any) {
         setFilteredTranscripts(prev => [newTranscript, ...prev]);
       }
       
-      Alert.alert('Success', `File synced and transcribed successfully!\n\n${sanitizedFileName}\n${wavData.length} bytes`);
+      Alert.alert('Success', `File synced and transcribed successfully!\n\n${sanitizedFileName}\n${format} format, ${audioData.length} bytes`);
       
       // Clear selection after successful sync
       setSelectedDevice(null);
@@ -839,7 +852,7 @@ export default function RecordScreen({ route }: any) {
   // Auto-scan functions
   const loadAutoScanPreference = async () => {
     try {
-      const storedValue = await SecureStore.getItemAsync(AUTO_SCAN_STORAGE_KEY);
+      const storedValue = await SecureStorageService.getItemAsync(AUTO_SCAN_STORAGE_KEY);
       if (storedValue !== null) {
         const enabled = JSON.parse(storedValue);
         setAutoScanEnabled(enabled);
@@ -852,7 +865,7 @@ export default function RecordScreen({ route }: any) {
 
   const saveAutoScanPreference = async (enabled: boolean) => {
     try {
-      await SecureStore.setItemAsync(AUTO_SCAN_STORAGE_KEY, JSON.stringify(enabled));
+      await SecureStorageService.setItemAsync(AUTO_SCAN_STORAGE_KEY, JSON.stringify(enabled));
       console.log('Saved auto-scan preference:', enabled);
     } catch (error) {
       console.error('Failed to save auto-scan preference:', error);
@@ -903,18 +916,15 @@ export default function RecordScreen({ route }: any) {
   const performAutoScan = async () => {
     // Don't auto-scan if manual operations are in progress
     if (isScanning || isSyncing || isRecording) {
-      console.log('Skipping auto-scan: manual operations in progress');
       return;
     }
 
     // Don't auto-scan if app is not in foreground
     if (appState !== 'active') {
-      console.log('Skipping auto-scan: app not in foreground');
       return;
     }
 
     try {
-      console.log('Performing auto-scan...');
       setIsAutoScanning(true);
       setLastAutoScanTime(new Date());
       
@@ -922,7 +932,8 @@ export default function RecordScreen({ route }: any) {
       const devices = await BLEFileTransferService.scanForDevices(AUTO_SCAN_TIMEOUT_MS);
       
       if (devices.length > 0) {
-        console.log(`Auto-scan found ${devices.length} devices:`, devices.map(d => d.name));
+        // Only log when XIAO devices are found
+        console.log(`🎙️ XIAO Device Found: ${devices[0].name} - Starting automatic sync...`);
         
         // Auto-connect to first device found
         const xiaoDevice = devices[0];
@@ -933,33 +944,8 @@ export default function RecordScreen({ route }: any) {
         stopAutoScan();
         setIsAutoScanning(false);
         
-        // Show alert and auto-sync
-        Alert.alert(
-          'XIAO Device Found!',
-          `Found "${xiaoDevice.name}". Auto-syncing now...`,
-          [
-            {
-              text: 'Cancel',
-              style: 'cancel',
-              onPress: () => {
-                setSelectedDevice(null);
-                setAvailableDevices([]);
-                // Resume auto-scanning after user cancels
-                if (autoScanEnabled && appState === 'active') {
-                  setTimeout(startAutoScan, 5000); // Resume after 5 seconds
-                }
-              }
-            },
-            {
-              text: 'Sync',
-              onPress: () => {
-                performSyncFromAutoScan(xiaoDevice);
-              }
-            }
-          ]
-        );
-      } else {
-        console.log('Auto-scan: no devices found');
+        // Auto-sync without showing popup
+        performSyncFromAutoScan(xiaoDevice);
       }
     } catch (error) {
       console.error('Auto-scan failed:', error);
@@ -1088,14 +1074,8 @@ export default function RecordScreen({ route }: any) {
               <View style={styles.sectionHeader}>
                 <Ionicons name="bluetooth" size={14} color={colors.primary.main} />
                 <Text style={styles.deviceUploadTitle}>Device</Text>
-                <Switch
-                  value={autoScanEnabled}
-                  onValueChange={toggleAutoScan}
-                  trackColor={{ false: colors.surface.border, true: `${colors.primary.main}40` }}
-                  thumbColor={autoScanEnabled ? colors.primary.main : colors.text.disabled}
-                  ios_backgroundColor={colors.surface.border}
-                  style={styles.switch}
-                />
+                {/* Auto-scan always enabled - no toggle needed */}
+                <Text style={styles.statusText}>Auto-scan enabled</Text>
               </View>
               
               <TouchableOpacity

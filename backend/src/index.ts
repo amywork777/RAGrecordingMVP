@@ -11,7 +11,7 @@ import chatRoutes from './routes/chat';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
 
 app.use(cors({
   origin: '*',
@@ -58,9 +58,10 @@ app.use('/api/chat', chatRoutes);
 
 app.use(errorHandler);
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`AI Wearable Companion Backend running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
+  console.log(`Network access: http://192.168.1.16:${PORT}/health`);
   console.log('\nAvailable endpoints:');
   console.log('POST /api/transcribe - Transcribe audio chunks');
   console.log('POST /api/search - Search through transcripts');
