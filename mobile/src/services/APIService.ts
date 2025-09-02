@@ -2,8 +2,8 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 function deriveDefaultBaseUrl(): string {
-  // Production backend URL for all non-development cases  
-  const PRODUCTION_URL = 'https://backend-1wk0gid4c-amy-zhous-projects-45e75853.vercel.app';
+  // NEW WORKING BACKEND URL - Fixed deployment with transcription fix
+  const PRODUCTION_URL = 'https://backend-henna-tau-11.vercel.app';
   
   console.log('=== API URL DERIVATION DEBUG ===');
   console.log('process.env.EXPO_PUBLIC_API_URL:', process.env.EXPO_PUBLIC_API_URL);
