@@ -241,7 +241,13 @@ class TranscriptionService {
       if (transcription.length < 50) {
         return { title: 'Brief Note', summary: transcription.substring(0, 100) };
       }
-      const completion = await this.openai.chat.completions.create({
+      
+      // Use same pattern as working /api/title-summary endpoint
+      const OpenAI = (await import('openai')).default;
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      console.log('TranscriptionService: Generating AI title/summary with OpenAI...');
+      
+      const completion = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
           { 
@@ -276,18 +282,19 @@ Respond in JSON format:
         max_tokens: 300,
         response_format: { type: "json_object" },
       });
-      const response = completion.choices[0].message.content;
-      if (response) {
-        const parsed = JSON.parse(response);
-        return { title: parsed.title || 'Untitled', summary: parsed.summary || 'No summary available.' };
-      }
-      return { title: 'Untitled Recording', summary: 'Unable to generate summary.' };
+      const result = JSON.parse(completion.choices[0].message.content || '{}');
+      const title = result.title || (transcription.split('\n')[0].slice(0, 50) || 'Untitled');
+      const summary = result.summary || (transcription.slice(0, 220) + (transcription.length > 220 ? '…' : ''));
+      console.log(`TranscriptionService: Generated AI title: "${title}"`);
+      return { title, summary };
     } catch (error) {
-      console.error('Error generating title and summary:', error);
+      console.error('TranscriptionService: AI title/summary generation failed:', error);
+      // Use same fallback as working endpoint
       const firstLine = transcription.split('\n')[0];
       const title = firstLine.substring(0, 50).trim() || 'Untitled Recording';
       const words = transcription.split(' ');
       const summary = words.slice(0, 50).join(' ') + (words.length > 50 ? '...' : '');
+      console.log(`TranscriptionService: Using fallback title: "${title}"`);
       return { title, summary };
     }
   }
