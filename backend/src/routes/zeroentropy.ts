@@ -142,33 +142,63 @@ router.post('/search', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Query is required' });
     }
     
-    const client = getZeroEntropyClient();
+    console.log(`Searching ZeroEntropy via REST API for: "${query}"`);
     
-    console.log(`Searching ZeroEntropy for: "${query}"`);
-    
-    // Search in ZeroEntropy
-    const searchResults = await client.queries.topDocuments({
-      collection_name: 'ai-wearable-transcripts',
-      query: query,
-      k: limit,
-      include_metadata: true,
+    // Search in ZeroEntropy using REST API
+    const searchResponse = await fetch(`https://api.zeroentropy.dev/v1/queries/top-documents`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.ZEROENTROPY_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        collection_name: 'ai-wearable-transcripts',
+        query: query,
+        k: limit,
+      }),
     });
+
+    if (!searchResponse.ok) {
+      throw new Error(`ZeroEntropy search API error: ${searchResponse.status} ${searchResponse.statusText}`);
+    }
+
+    const searchData = await searchResponse.json();
+    const searchResults = searchData.results || [];
     
-    // Get document content for top results
+    // Get document content for top results using REST API
     const topDocs = await Promise.all(
-      ((searchResults as any).results || []).slice(0, 5).map(async (result: any) => {
+      searchResults.slice(0, 5).map(async (result: any) => {
         try {
-          const docInfo = await client.documents.getInfo({
-            collection_name: 'ai-wearable-transcripts',
-            path: result.path,
-            include_content: true,
+          const contentResponse = await fetch(`https://api.zeroentropy.dev/v1/documents/get-document-info`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.ZEROENTROPY_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              collection_name: 'ai-wearable-transcripts',
+              path: result.path,
+              include_content: true,
+            }),
           });
-          return {
-            path: result.path,
-            score: result.score,
-            content: (docInfo as any).document?.content || '',
-            metadata: result.metadata || {},
-          };
+          
+          if (contentResponse.ok) {
+            const contentData = await contentResponse.json();
+            return {
+              path: result.path,
+              score: result.score,
+              content: contentData.document?.content || '',
+              metadata: result.metadata || {},
+            };
+          } else {
+            console.warn(`Failed to fetch content for ${result.path}`);
+            return {
+              path: result.path,
+              score: result.score,
+              content: '',
+              metadata: result.metadata || {},
+            };
+          }
         } catch (error) {
           console.error(`Error fetching content for ${result.path}:`, error);
           return {
