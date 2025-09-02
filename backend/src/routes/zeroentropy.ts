@@ -162,7 +162,7 @@ router.post('/search', async (req: Request, res: Response) => {
       throw new Error(`ZeroEntropy search API error: ${searchResponse.status} ${searchResponse.statusText}`);
     }
 
-    const searchData = await searchResponse.json();
+    const searchData: any = await searchResponse.json();
     const searchResults = searchData.results || [];
     
     // Get document content for top results using REST API
@@ -183,7 +183,7 @@ router.post('/search', async (req: Request, res: Response) => {
           });
           
           if (contentResponse.ok) {
-            const contentData = await contentResponse.json();
+            const contentData: any = await contentResponse.json();
             return {
               path: result.path,
               score: result.score,
@@ -215,7 +215,7 @@ router.post('/search', async (req: Request, res: Response) => {
     let answer: string | undefined;
     let sources: any[] = [];
     if (useGPT && topDocs.length > 0) {
-      const contextDocs = topDocs.map(doc => ({
+      const contextDocs = topDocs.map((doc: any) => ({
         text: doc.content,
         topic: doc.metadata?.topic || 'Unknown',
         timestamp: doc.metadata?.timestamp || '',
