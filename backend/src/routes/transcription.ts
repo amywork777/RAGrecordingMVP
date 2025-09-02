@@ -92,7 +92,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
     if (!zeResponse.ok) {
       const errorText = await zeResponse.text();
       console.error(`ZeroEntropy save failed: ${zeResponse.status} ${zeResponse.statusText} - ${errorText}`);
-      console.log('Continuing without ZeroEntropy save - transcription will still work');
+      console.log('ZeroEntropy save failed but transcription continues - v1.0.1');
       // Don't throw error - continue with transcription response
     } else {
       zeData = await zeResponse.json();
