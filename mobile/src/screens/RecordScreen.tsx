@@ -60,6 +60,7 @@ export default function RecordScreen({ route }: any) {
   const navigation = useNavigation();
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isBackgroundRecording, setIsBackgroundRecording] = useState(false);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [currentRecordingId, setCurrentRecordingId] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
@@ -124,11 +125,13 @@ export default function RecordScreen({ route }: any) {
       console.log('App state changed to:', nextAppState);
       
       if (nextAppState === 'background' && isRecording) {
-        console.log('App backgrounded while recording - maintaining recording session');
-        // Recording should continue in background with audio mode configured
-      } else if (nextAppState === 'active' && isRecording) {
-        console.log('App foregrounded while recording - recording session active');
-        // Verify recording is still active when returning to foreground
+        console.log('App backgrounded while recording - enabling background mode');
+        setIsBackgroundRecording(true);
+      } else if (nextAppState === 'active') {
+        if (isRecording && isBackgroundRecording) {
+          console.log('App foregrounded while background recording - recording still active');
+        }
+        setIsBackgroundRecording(false);
       }
     };
 
@@ -137,7 +140,7 @@ export default function RecordScreen({ route }: any) {
     return () => {
       subscription?.remove();
     };
-  }, [isRecording]);
+  }, [isRecording, isBackgroundRecording]);
 
   useEffect(() => {
     BLEService.on('deviceConnected', handleDeviceConnected);
@@ -948,6 +951,12 @@ export default function RecordScreen({ route }: any) {
             <View style={styles.recordingBadge}>
               <View style={styles.recordingDot} />
               <Text style={styles.recordingTime}>{formatTime(recordingTime)}</Text>
+              {isBackgroundRecording && (
+                <View style={styles.backgroundIndicator}>
+                  <Ionicons name="moon" size={12} color="#fff" />
+                  <Text style={styles.backgroundText}>BG</Text>
+                </View>
+              )}
             </View>
           )}
         </View>
@@ -1317,6 +1326,22 @@ const createStyles = (colors: any) => StyleSheet.create({
     ...typography.micro,
     color: '#fff',
     textTransform: 'none',
+  },
+  backgroundIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
+    marginLeft: spacing.xs,
+    gap: 2,
+  },
+  backgroundText: {
+    ...typography.micro,
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '600',
   },
   recordContainer: {
     alignItems: 'center',
