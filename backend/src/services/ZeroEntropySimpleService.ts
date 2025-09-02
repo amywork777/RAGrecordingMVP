@@ -83,7 +83,7 @@ class ZeroEntropySimpleService {
             },
             body: JSON.stringify({
               collection_name: 'ai-wearable-transcripts',
-              limit: limit || 100,
+              limit: Math.max(limit || 10, 200), // Get many more documents to ensure we catch recent ones
               path_prefix: null,
               path_gt: null,
             }),
@@ -152,7 +152,19 @@ class ZeroEntropySimpleService {
               })
             );
             
-            return documentsWithContent;
+            // Sort documents by timestamp (newest first) before returning
+            const sortedDocuments = documentsWithContent.sort((a, b) => {
+              const timeA = new Date(a.metadata.timestamp).getTime();
+              const timeB = new Date(b.metadata.timestamp).getTime();
+              return timeB - timeA; // Newest first
+            });
+            
+            console.log(`[ZeroEntropy] Sorted ${sortedDocuments.length} documents by timestamp`);
+            
+            // Return only the requested number of documents (after sorting)
+            const finalResults = sortedDocuments.slice(0, limit || 10);
+            console.log(`[ZeroEntropy] Returning ${finalResults.length} most recent documents`);
+            return finalResults;
           }
         } else {
           const errorText = await response.text();
