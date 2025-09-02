@@ -215,27 +215,16 @@ class APIService {
   }
 
   async getRecentTranscripts(limit: number = 10): Promise<SearchResult[]> {
-    // Try to fetch from ZeroEntropy first
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/zeroentropy/documents?limit=${limit}`);
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log(`Fetched ${data.count} documents from ZeroEntropy`);
-        return data.documents || [];
-      }
-    } catch (error) {
-      console.log('ZeroEntropy fetch failed, falling back to mock data');
-    }
-
-    // Fallback to mock data endpoint
+    // Use the correct endpoint that has proper sorting and timestamp functionality
     const response = await fetch(`${API_BASE_URL}/api/transcripts/recent?limit=${limit}`);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch recent transcripts: ${response.statusText}`);
     }
 
-    return response.json();
+    const results = await response.json();
+    console.log(`Fetched ${results.length} recent transcripts with proper sorting`);
+    return results;
   }
 
   async uploadTextDocument(
