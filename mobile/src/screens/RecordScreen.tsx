@@ -389,94 +389,23 @@ export default function RecordScreen({ route }: any) {
   };
 
   const toggleRecording = async () => {
-    console.log('toggleRecording called, current isRecording:', isRecording);
-    
     if (isRecording) {
-      console.log('Stopping recording...');
       try {
         setIsLoading(true);
         
         const audioUri = await AudioRecordingService.stopRecording();
-        console.log('Audio stopped, URI:', audioUri);
         
         if (audioUri) {
           const base64Audio = await AudioRecordingService.getRecordingBase64();
-          console.log('Base64 audio length:', base64Audio?.length);
-          console.log('Audio URI:', audioUri);
           
           if (base64Audio) {
-            // Save recording to organized storage
-            const now = new Date();
-            const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-            const recordingsDir = `${FileSystem.documentDirectory}recordings/`;
-            const monthDir = `${recordingsDir}${yearMonth}/`;
+            const response = await APIService.sendAudioBase64(base64Audio, currentRecordingId, 'm4a');
             
-            // Ensure directories exist
-            const recordingsDirInfo = await FileSystem.getInfoAsync(recordingsDir);
-            if (!recordingsDirInfo.exists) {
-              await FileSystem.makeDirectoryAsync(recordingsDir, { intermediates: true });
+            if (response.transcription) {
+              console.log('Transcription received:', response.transcription);
+              setTimeout(loadTranscriptsFromBackend, 2000);
             }
-            
-            const monthDirInfo = await FileSystem.getInfoAsync(monthDir);
-            if (!monthDirInfo.exists) {
-              await FileSystem.makeDirectoryAsync(monthDir, { intermediates: true });
-            }
-            
-            // Save m4a file locally
-            const timestamp = now.toISOString().replace(/[:.]/g, '-');
-            const fileName = `recording_${timestamp}.m4a`;
-            const localAudioPath = `${monthDir}${currentRecordingId}_${fileName}`;
-            
-            await FileSystem.writeAsStringAsync(
-              localAudioPath,
-              base64Audio,
-              { encoding: FileSystem.EncodingType.Base64 }
-            );
-            
-            console.log(`Audio saved locally to: ${localAudioPath}`);
-            console.log('Sending to API...');
-            
-            try {
-              const response = await APIService.sendAudioBase64(base64Audio, currentRecordingId, 'm4a');
-              console.log('API Response:', response);
-              
-              if (response.transcription) {
-                console.log('Transcription received:', response.transcription);
-                
-                // Immediately add the new transcript to the UI with local audio path
-                const newTranscript = {
-                  id: currentRecordingId,
-                  text: response.transcription,
-                  title: response.title,
-                  summary: response.summary,
-                  timestamp: new Date(response.timestamp),
-                  aiTitle: response.title,
-                  aiSummary: response.summary,
-                  localAudioPath: localAudioPath, // Store local audio path
-                  remoteAudioUrl: response.audioUrl, // Store remote URL if provided
-                  source: 'recording' as const, // Mark as recording source
-                };
-                
-                console.log('Adding transcript to UI:', newTranscript);
-                setTranscripts(prev => [newTranscript as any, ...prev]);
-                
-                // Refresh from backend after a shorter delay
-                setTimeout(() => {
-                  console.log('Refreshing transcripts from backend after recording...');
-                  loadTranscriptsFromBackend();
-                }, 3000); // Reduced delay to 3 seconds
-              } else {
-                console.log('No transcription in response');
-              }
-            } catch (apiError) {
-              console.error('API call failed:', apiError);
-              Alert.alert('Transcription Error', 'Failed to transcribe audio. Check backend connection.');
-            }
-          } else {
-            console.log('No base64 audio data available');
           }
-        } else {
-          console.log('No audio URI from recording');
         }
       } catch (error) {
         console.error('Failed to stop recording:', error);
@@ -485,24 +414,19 @@ export default function RecordScreen({ route }: any) {
         setIsLoading(false);
         setIsRecording(false);
         setCurrentRecordingId('');
-        console.log('Recording stopped, isRecording set to false');
       }
     } else {
-      console.log('Starting recording...');
       try {
         const recordingId = uuid.v4() as string;
         setCurrentRecordingId(recordingId);
-        console.log('Generated recording ID:', recordingId);
         
-        console.log('Calling AudioRecordingService.startRecording()...');
         await AudioRecordingService.startRecording();
         setIsRecording(true);
-        console.log('Audio recording started successfully, isRecording set to true');
+        console.log('Audio recording started');
       } catch (error) {
         console.error('Failed to start recording:', error);
         Alert.alert('Recording Error', 'Failed to start recording. Please check microphone permissions.');
         setIsRecording(false);
-        console.log('Recording failed, isRecording set to false');
       }
     }
   };
