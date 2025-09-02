@@ -98,6 +98,8 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       zeData = await zeResponse.json();
       zeroEntropySuccess = true;
       console.log('ZeroEntropy save successful:', zeResponse.status);
+      console.log('ZeroEntropy response data:', JSON.stringify(zeData, null, 2));
+      console.log('Document path saved:', zePath);
     }
 
     // Fire-and-forget: upsert into Supabase, then write latest AI title/summary
