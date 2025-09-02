@@ -41,9 +41,10 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
+    version: '1.0.1', // Force deployment refresh
     services: {
       transcription: 'operational',
-      zeroentropy: 'operational',
+      zeroentropy: 'operational', 
       search: 'operational',
     },
   });
