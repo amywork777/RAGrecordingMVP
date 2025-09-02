@@ -163,6 +163,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       details: errorMessage,
       hasKeys: {
         openai: !!process.env.OPENAI_API_KEY,
+        assemblyai: !!process.env.ASSEMBLY_API_KEY,
         zeroentropy: !!process.env.ZEROENTROPY_API_KEY
       }
     });

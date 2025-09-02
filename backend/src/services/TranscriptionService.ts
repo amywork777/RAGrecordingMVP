@@ -15,7 +15,7 @@ class TranscriptionService {
     
     // AssemblyAI for audio transcription + diarization (audio-based speaker detection)
     this.assemblyai = new AssemblyAI({
-      apiKey: process.env.ASSEMBLYAI_API_KEY || '',
+      apiKey: process.env.ASSEMBLY_API_KEY || '',
     });
   }
 
@@ -37,7 +37,7 @@ class TranscriptionService {
       
       let transcription: string;
       
-      if (process.env.ASSEMBLYAI_API_KEY) {
+      if (process.env.ASSEMBLY_API_KEY) {
         // 1) Non-diarized transcript (fast, stable)
         const plainTranscript = await this.transcribeWithAssemblyAIPlain(audioBuffer, format);
         // 2) Text-only classifier (heuristic routing hint, not authoritative)
