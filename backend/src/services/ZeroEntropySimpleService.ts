@@ -92,18 +92,67 @@ class ZeroEntropySimpleService {
 
         if (response.ok) {
           const data: any = await response.json();
-          console.log(`[ZeroEntropy] Retrieved ${data.documents?.length || 0} real documents`);
+          const documents = data.documents || data.results || [];
+          console.log(`[ZeroEntropy] Retrieved ${documents.length} real documents`);
           
-          if (data.documents && data.documents.length > 0) {
-            return data.documents.map((doc: any) => ({
-              id: doc.id || 'unknown',
-              text: doc.path || doc.text || 'No content available', // Use path for now since content isn't directly available
-              score: doc.score || 0.95, // Use score from search, or high score for list
-              metadata: {
-                timestamp: doc.created_at || doc.metadata?.timestamp || new Date().toISOString(),
-                recordingId: doc.metadata?.recordingId || doc.path || doc.id || 'unknown'
-              }
-            }));
+          if (documents.length > 0) {
+            // Fetch document content for each document
+            const documentsWithContent = await Promise.all(
+              documents.map(async (doc: any) => {
+                try {
+                  // Get document content using the get-document-info endpoint
+                  const contentResponse = await fetch(`https://api.zeroentropy.dev/v1/documents/get-document-info`, {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${this.apiKey}`,
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                      collection_name: 'ai-wearable-transcripts',
+                      path: doc.path,
+                      include_content: true,
+                    }),
+                  });
+                  
+                  if (contentResponse.ok) {
+                    const contentData: any = await contentResponse.json();
+                    return {
+                      id: doc.id || doc.path || 'unknown',
+                      text: contentData.document?.content || doc.text || '[Content not available]',
+                      score: doc.score || 0.95,
+                      metadata: {
+                        timestamp: contentData.document?.created_at || doc.created_at || doc.metadata?.timestamp || new Date().toISOString(),
+                        recordingId: contentData.document?.metadata?.recordingId || doc.metadata?.recordingId || doc.path || doc.id || 'unknown'
+                      }
+                    };
+                  } else {
+                    console.warn(`Failed to fetch content for ${doc.path}: ${contentResponse.status}`);
+                    return {
+                      id: doc.id || doc.path || 'unknown',
+                      text: doc.text || '[Content fetch failed]',
+                      score: doc.score || 0.95,
+                      metadata: {
+                        timestamp: doc.created_at || doc.metadata?.timestamp || new Date().toISOString(),
+                        recordingId: doc.metadata?.recordingId || doc.path || doc.id || 'unknown'
+                      }
+                    };
+                  }
+                } catch (error) {
+                  console.error(`Error fetching content for ${doc.path}:`, error);
+                  return {
+                    id: doc.id || doc.path || 'unknown',
+                    text: doc.text || '[Content error]',
+                    score: doc.score || 0.95,
+                    metadata: {
+                      timestamp: doc.created_at || doc.metadata?.timestamp || new Date().toISOString(),
+                      recordingId: doc.metadata?.recordingId || doc.path || doc.id || 'unknown'
+                    }
+                  };
+                }
+              })
+            );
+            
+            return documentsWithContent;
           }
         } else {
           const errorText = await response.text();
