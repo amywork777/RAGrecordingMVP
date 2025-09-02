@@ -58,12 +58,65 @@ router.get('/transcripts/recent', async (req: Request, res: Response) => {
       recordingId: t.metadata?.recordingId || 'unknown'
     }));
     
-    const formattedResults = results.map(result => ({
-      id: result.id,
-      text: result.text,
-      timestamp: result.timestamp,
-      recordingId: result.recordingId,
-      score: 1.0,
+    // Generate AI titles and summaries for each transcript
+    const formattedResults = await Promise.all(results.map(async (result) => {
+      let title = 'Untitled Recording';
+      let summary = result.text.slice(0, 160) + (result.text.length > 160 ? '…' : '');
+      
+      // Generate AI title/summary if text is substantial
+      if (result.text && result.text.length > 50) {
+        try {
+          const OpenAI = (await import('openai')).default;
+          const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+          
+          const completion = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+              { 
+                role: 'system', 
+                content: 'You are an expert at creating compelling, specific titles and summaries for voice recordings and transcribed conversations. Create titles that capture the essence, main topic, or key insight rather than generic descriptions. Focus on what makes this recording unique or interesting.' 
+              },
+              { 
+                role: 'user', 
+                content: `Analyze this transcription and create:
+
+1. A compelling, specific title (35-45 characters) that captures the main topic, key insight, or most interesting aspect. Avoid generic words like "discussion", "conversation", "recording", "meeting". Focus on the actual subject matter.
+
+2. A concise 2-3 sentence summary highlighting the key points, decisions, or insights.
+
+Content: ${result.text.substring(0, 3000)}
+
+Respond in JSON format:
+{
+  "title": "Your compelling title here",
+  "summary": "Your detailed summary here"
+}`
+              },
+            ],
+            temperature: 0.8,
+            max_tokens: 300,
+            response_format: { type: "json_object" },
+          });
+          
+          const aiResult = JSON.parse(completion.choices[0].message.content || '{}');
+          title = aiResult.title || (result.text.split('\n')[0].slice(0, 50) || 'Untitled');
+          summary = aiResult.summary || summary;
+          console.log(`Generated AI title for ${result.id}: "${title}"`);
+        } catch (error) {
+          console.error('AI title generation failed for', result.id, ':', error);
+          // Keep fallback values
+        }
+      }
+      
+      return {
+        id: result.id,
+        text: result.text,
+        title: title,
+        summary: summary,
+        timestamp: result.timestamp,
+        recordingId: result.recordingId,
+        score: 1.0,
+      };
     }));
 
     res.json(formattedResults);
