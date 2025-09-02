@@ -1,0 +1,11 @@
+{
+  "name": "ragrecording-root",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "cd backend && npm run build",
+    "dev": "cd backend && npm run dev",
+    "start": "cd backend && npm run start"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "name": "ragrecording-backend",
+  "builds": [
+    {
+      "src": "backend/src/index.ts",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "backend/src/index.ts"
+    }
+  ],
+  "functions": {
+    "backend/src/index.ts": {
+      "maxDuration": 60
+    }
+  }
+}
