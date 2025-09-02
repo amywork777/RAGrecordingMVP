@@ -41,12 +41,23 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    version: '1.0.2-FORCE-DEPLOY', // Force deployment refresh
+    version: '1.0.2-FORCE-DEPLOY', 
+    deployTime: 'Sep-02-2025-00:20:00',
+    fixApplied: 'non-blocking-zeroentropy-save',
     services: {
       transcription: 'operational',
       zeroentropy: 'operational', 
       search: 'operational',
     },
+  });
+});
+
+app.get('/test-fix', (req, res) => {
+  res.json({
+    message: 'Transcription fix is deployed!',
+    version: '1.0.2-FORCE-DEPLOY',
+    fix: 'ZeroEntropy save is now non-blocking',
+    timestamp: new Date().toISOString()
   });
 });
 
