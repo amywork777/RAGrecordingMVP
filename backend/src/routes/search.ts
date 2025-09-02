@@ -63,8 +63,8 @@ router.get('/transcripts/recent', async (req: Request, res: Response) => {
       let title = 'Untitled Recording';
       let summary = result.text.slice(0, 160) + (result.text.length > 160 ? '…' : '');
       
-      // Generate AI title/summary if text is substantial
-      if (result.text && result.text.length > 50) {
+      // Generate AI title/summary for any non-empty text
+      if (result.text && result.text.trim().length > 0) {
         try {
           const OpenAI = (await import('openai')).default;
           const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -80,9 +80,14 @@ router.get('/transcripts/recent', async (req: Request, res: Response) => {
                 role: 'user', 
                 content: `Analyze this transcription and create:
 
-1. A compelling, specific title (35-45 characters) that captures the main topic, key insight, or most interesting aspect. Avoid generic words like "discussion", "conversation", "recording", "meeting". Focus on the actual subject matter.
+1. A compelling, specific title (20-50 characters) that captures the main topic, key insight, or most interesting aspect. Even for very short content, create an engaging title that describes what was said. Avoid generic words like "discussion", "conversation", "recording", "meeting", "untitled". Focus on the actual subject matter or content.
 
-2. A concise 2-3 sentence summary highlighting the key points, decisions, or insights.
+2. A concise summary highlighting the key points, decisions, or insights. For short content, provide context about what was captured.
+
+Examples for short content:
+- "Red, blue, green" → Title: "Color Sequence List", Summary: "A brief enumeration of primary colors in sequence."
+- "Hello world" → Title: "Friendly Greeting", Summary: "A simple, welcoming salutation."
+- "Testing 123" → Title: "Audio Test Check", Summary: "A quick system test to verify recording functionality."
 
 Content: ${result.text.substring(0, 3000)}
 
