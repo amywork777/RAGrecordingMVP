@@ -6,7 +6,7 @@ import * as TaskManager from 'expo-task-manager';
 const BACKGROUND_RECORDING_TASK = 'background-recording-task';
 
 // Define background task for recording
-TaskManager.defineTask(BACKGROUND_RECORDING_TASK, ({ data, error }) => {
+TaskManager.defineTask(BACKGROUND_RECORDING_TASK, async ({ data, error }) => {
   if (error) {
     console.error('Background recording task error:', error);
     return;

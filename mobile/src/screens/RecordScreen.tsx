@@ -27,6 +27,7 @@ import uuid from 'react-native-uuid';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import SecureStorageService from '../services/SecureStorageService';
+import WebhookService from '../services/WebhookService';
 import { Buffer } from 'buffer';
 import { useTheme, spacing, borderRadius, typography, shadows } from '../theme/colors';
 
@@ -89,6 +90,13 @@ export default function RecordScreen({ route }: any) {
   const [autoScanInterval, setAutoScanInterval] = useState<NodeJS.Timeout | null>(null);
   const [appState, setAppState] = useState(AppState.currentState);
 
+  // Webhook integration states
+  const [isWebhookMonitoring, setIsWebhookMonitoring] = useState(false);
+  const [isHardwareRecording, setIsHardwareRecording] = useState(false);
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+  const [realtimeTranscripts, setRealtimeTranscripts] = useState<any[]>([]);
+  const [webhookRecordingDuration, setWebhookRecordingDuration] = useState(0);
+
   // Handle deep linking via events
   useEffect(() => {
     const handleDeepLink = (data: { action: string }) => {
@@ -147,10 +155,23 @@ export default function RecordScreen({ route }: any) {
     BLEService.on('deviceDisconnected', handleDeviceDisconnected);
     BLEService.on('audioChunk', handleAudioChunk);
 
+    // Setup webhook event listeners
+    WebhookService.on('recordingStarted', handleWebhookRecordingStarted);
+    WebhookService.on('transcriptionUpdate', handleWebhookTranscriptionUpdate);
+    WebhookService.on('recordingEnded', handleWebhookRecordingEnded);
+    WebhookService.on('conversationSummarized', handleConversationSummarized);
+    WebhookService.on('monitoringStarted', () => setIsWebhookMonitoring(true));
+    WebhookService.on('monitoringStopped', () => setIsWebhookMonitoring(false));
+
     loadTranscriptsFromBackend();
+
+    // Auto-start webhook monitoring
+    WebhookService.startMonitoring();
 
     return () => {
       BLEService.removeAllListeners();
+      WebhookService.removeAllListeners();
+      WebhookService.stopMonitoring();
       if (intervalId) clearInterval(intervalId);
     };
   }, [currentRecordingId]);
@@ -389,6 +410,111 @@ export default function RecordScreen({ route }: any) {
     } catch (error) {
       console.error('Error processing audio chunk:', error);
     }
+  };
+
+  // Webhook event handlers
+  const handleWebhookRecordingStarted = (data: any) => {
+    console.log('🎙️ Hardware recording started:', data);
+    setIsHardwareRecording(true);
+    setCurrentConversationId(data.conversationId);
+    setRealtimeTranscripts([]);
+    setWebhookRecordingDuration(0);
+    
+    // Start duration timer
+    const startTime = Date.now();
+    const timer = setInterval(() => {
+      setWebhookRecordingDuration(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
+    
+    // Store timer reference for cleanup
+    setTimeout(() => clearInterval(timer), 300000); // Auto-clear after 5 minutes
+  };
+
+  const handleWebhookTranscriptionUpdate = (data: any) => {
+    console.log('📝 Hardware transcription update:', data.segments.length, 'segments');
+    // Add timestamp to each segment for display
+    const segmentsWithTimestamp = data.segments.map((segment: any) => ({
+      ...segment,
+      receivedAt: new Date(),
+      conversationId: data.conversationId || 'webhook-live'
+    }));
+    setRealtimeTranscripts(prev => [...prev, ...segmentsWithTimestamp]);
+  };
+
+  const handleWebhookRecordingEnded = (data: any) => {
+    console.log('⏹️ Hardware recording ended:', data.reason, `Duration: ${data.duration}ms`);
+    setIsHardwareRecording(false);
+    setCurrentConversationId(null);
+    setWebhookRecordingDuration(0);
+    
+    // Convert webhook transcription to regular transcript format and save
+    if (realtimeTranscripts.length > 0) {
+      const webhookText = realtimeTranscripts
+        .map(segment => `[${segment.speaker || 'Speaker'}] ${segment.text}`)
+        .join('\n');
+      
+      const webhookTranscript: Transcript = {
+        id: uuid.v4() as string,
+        text: webhookText,
+        title: `Webhook Recording - ${data.reason}`,
+        summary: `Hardware recording captured ${realtimeTranscripts.length} segments over ${Math.round(data.duration / 1000)}s`,
+        timestamp: new Date(),
+        aiTitle: 'Hardware Transcription',
+        aiSummary: `Captured via webhook monitoring (${data.reason})`
+      };
+      
+      setTranscripts(prev => [webhookTranscript, ...prev]);
+      console.log('💾 Saved webhook transcription with', realtimeTranscripts.length, 'segments');
+      
+      // Clear realtime transcripts after saving
+      setRealtimeTranscripts([]);
+    }
+  };
+
+  const handleConversationSummarized = async (data: any) => {
+    console.log('📋 Conversation summarized:', data.conversationId);
+    
+    // Create a transcript from the conversation
+    const conversation = data.conversation;
+    const fullText = conversation.transcripts.map((t: any) => t.text).join(' ');
+    
+    if (fullText.trim().length > 0) {
+      const newTranscript: Transcript = {
+        id: conversation.id,
+        text: fullText,
+        title: `Hardware Recording ${conversation.startTime}`,
+        summary: data.summary,
+        timestamp: new Date(conversation.startTime),
+        aiTitle: `Hardware Recording ${new Date(conversation.startTime).toLocaleDateString()}`,
+        aiSummary: data.summary,
+        durationSeconds: Math.floor((new Date(conversation.endTime).getTime() - new Date(conversation.startTime).getTime()) / 1000),
+        source: 'hardware',
+      };
+      
+      setTranscripts(prev => [newTranscript, ...prev]);
+      setFilteredTranscripts(prev => [newTranscript, ...prev]);
+      
+      // Also save to backend
+      try {
+        await APIService.uploadTextDocument(fullText, {
+          path: `hardware/recordings/${conversation.id}`,
+          metadata: { 
+            source: 'hardware', 
+            conversationId: conversation.id,
+            summary: data.summary,
+            startTime: conversation.startTime,
+            endTime: conversation.endTime,
+          },
+          collectionName: 'ai-wearable-transcripts',
+        });
+        console.log('Hardware recording saved to backend');
+      } catch (error) {
+        console.error('Failed to save hardware recording to backend:', error);
+      }
+    }
+    
+    // Clear realtime transcripts
+    setRealtimeTranscripts([]);
   };
 
   const toggleRecording = async () => {
@@ -947,18 +1073,35 @@ export default function RecordScreen({ route }: any) {
       >
         <View style={styles.header}>
           <Text style={styles.title}>Welcome to Tai</Text>
-          {isRecording && (
-            <View style={styles.recordingBadge}>
-              <View style={styles.recordingDot} />
-              <Text style={styles.recordingTime}>{formatTime(recordingTime)}</Text>
-              {isBackgroundRecording && (
-                <View style={styles.backgroundIndicator}>
-                  <Ionicons name="moon" size={12} color="#fff" />
-                  <Text style={styles.backgroundText}>BG</Text>
-                </View>
-              )}
-            </View>
-          )}
+          <View style={styles.statusBadges}>
+            {isRecording && (
+              <View style={styles.recordingBadge}>
+                <View style={styles.recordingDot} />
+                <Text style={styles.recordingTime}>{formatTime(recordingTime)}</Text>
+                <Text style={styles.recordingLabel}>APP</Text>
+                {isBackgroundRecording && (
+                  <View style={styles.backgroundIndicator}>
+                    <Ionicons name="moon" size={12} color="#fff" />
+                    <Text style={styles.backgroundText}>BG</Text>
+                  </View>
+                )}
+              </View>
+            )}
+            {isHardwareRecording && (
+              <View style={styles.hardwareRecordingBadge}>
+                <View style={styles.recordingDot} />
+                <Text style={styles.recordingTime}>{formatTime(webhookRecordingDuration)}</Text>
+                <Text style={styles.recordingLabel}>HW</Text>
+                <Ionicons name="hardware-chip" size={12} color="#fff" />
+              </View>
+            )}
+            {isWebhookMonitoring && !isHardwareRecording && (
+              <View style={styles.monitoringBadge}>
+                <ActivityIndicator size="small" color="#fff" />
+                <Text style={styles.monitoringText}>LISTENING</Text>
+              </View>
+            )}
+          </View>
         </View>
 
         <View style={styles.recordContainer}>
@@ -1108,6 +1251,85 @@ export default function RecordScreen({ route }: any) {
             )}
           </View>
 
+          {/* Webhook Transcription Monitor */}
+          {isWebhookMonitoring && (
+            <View style={styles.realtimeSection}>
+              <View style={styles.realtimeHeader}>
+                <Ionicons name="radio" size={16} color={isHardwareRecording ? colors.accent.main : colors.primary.main} />
+                <Text style={styles.realtimeSectionTitle}>
+                  {isHardwareRecording ? '🔴 Recording' : '👂 Listening'} for Transcripts
+                </Text>
+                <View style={styles.statusIndicator}>
+                  <ActivityIndicator size="small" color={colors.primary.main} />
+                  <Text style={styles.statusText}>LIVE</Text>
+                </View>
+              </View>
+              
+              {realtimeTranscripts.length > 0 ? (
+                <ScrollView style={styles.transcriptContainer} nestedScrollEnabled>
+                  {realtimeTranscripts.slice(-10).map((segment, index) => (
+                    <View key={`${segment.id || index}-${segment.receivedAt?.getTime()}`} style={styles.transcriptSegment}>
+                      <View style={styles.transcriptHeader}>
+                        <Text style={styles.transcriptTime}>
+                          {segment.receivedAt ? segment.receivedAt.toLocaleTimeString() : 'Now'}
+                        </Text>
+                        {segment.speaker && (
+                          <Text style={styles.transcriptSpeaker}>{segment.speaker}</Text>
+                        )}
+                        {segment.confidence && (
+                          <Text style={styles.transcriptConfidence}>
+                            {Math.round(segment.confidence * 100)}%
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={styles.transcriptText}>{segment.text}</Text>
+                    </View>
+                  ))}
+                  {realtimeTranscripts.length > 10 && (
+                    <Text style={styles.realtimeMore}>
+                      +{realtimeTranscripts.length - 10} earlier transcripts...
+                    </Text>
+                  )}
+                </ScrollView>
+              ) : (
+                <View style={styles.emptyTranscriptState}>
+                  <Text style={styles.emptyTranscriptText}>
+                    Waiting for transcription data from webhook...
+                  </Text>
+                  <Text style={styles.emptyTranscriptSubtext}>
+                    Send audio to trigger hardware transcription
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Webhook Testing (Development) */}
+          {__DEV__ && isWebhookMonitoring && (
+            <View style={styles.webhookTestSection}>
+              <Text style={styles.webhookTestTitle}>🧪 Webhook Testing</Text>
+              <View style={styles.webhookTestButtons}>
+                <TouchableOpacity
+                  style={styles.webhookTestButton}
+                  onPress={() => WebhookService.simulateWebhookTranscription('Hello! This is a simulated transcription from hardware.')}
+                >
+                  <Text style={styles.webhookTestButtonText}>Add Test Transcript</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.webhookTestButton}
+                  onPress={() => WebhookService.simulateRecordingStart()}
+                >
+                  <Text style={styles.webhookTestButtonText}>Start Recording</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.webhookTestButton}
+                  onPress={() => WebhookService.simulateRecordingEnd()}
+                >
+                  <Text style={styles.webhookTestButtonText}>End Recording</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
 
           <ScrollView 
             ref={scrollViewRef}
@@ -1305,6 +1527,11 @@ const createStyles = (colors: any) => StyleSheet.create({
     ...typography.h1,
     color: colors.text.primary,
   },
+  statusBadges: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: spacing.xs,
+  },
   recordingBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1314,6 +1541,25 @@ const createStyles = (colors: any) => StyleSheet.create({
     borderRadius: borderRadius.full,
     ...shadows.button,
     shadowColor: colors.accent.error,
+  },
+  hardwareRecordingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary.main,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.full,
+    ...shadows.button,
+    shadowColor: colors.primary.main,
+  },
+  monitoringBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.text.secondary,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.full,
+    opacity: 0.7,
   },
   recordingDot: {
     width: 8,
@@ -1326,6 +1572,21 @@ const createStyles = (colors: any) => StyleSheet.create({
     ...typography.micro,
     color: '#fff',
     textTransform: 'none',
+  },
+  recordingLabel: {
+    ...typography.micro,
+    color: '#fff',
+    fontSize: 8,
+    fontWeight: '700',
+    marginLeft: spacing.xs,
+    opacity: 0.8,
+  },
+  monitoringText: {
+    ...typography.micro,
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '600',
+    marginLeft: spacing.xs,
   },
   backgroundIndicator: {
     flexDirection: 'row',
@@ -1572,6 +1833,163 @@ const createStyles = (colors: any) => StyleSheet.create({
     marginTop: spacing.xs,
     marginLeft: spacing.sm,
   },
+  realtimeSection: {
+    backgroundColor: `${colors.primary.main}08`,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: `${colors.primary.main}20`,
+  },
+  realtimeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+    gap: spacing.xs,
+  },
+  realtimeSectionTitle: {
+    ...typography.h3,
+    color: colors.primary.main,
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+  },
+  statusIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  statusText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.primary.main,
+    letterSpacing: 0.5,
+  },
+  transcriptContainer: {
+    maxHeight: 300,
+    backgroundColor: colors.background.secondary,
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+  },
+  transcriptSegment: {
+    marginBottom: spacing.md,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: `${colors.text.secondary}20`,
+  },
+  transcriptHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  transcriptTime: {
+    fontSize: 10,
+    color: colors.text.secondary,
+    fontWeight: '500',
+  },
+  transcriptSpeaker: {
+    fontSize: 10,
+    color: colors.primary.main,
+    fontWeight: '600',
+    backgroundColor: `${colors.primary.main}15`,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
+    borderRadius: borderRadius.xs,
+  },
+  transcriptConfidence: {
+    fontSize: 10,
+    color: colors.accent.main,
+    fontWeight: '500',
+  },
+  transcriptText: {
+    fontSize: 14,
+    color: colors.text.primary,
+    lineHeight: 20,
+    fontFamily: 'General Sans',
+  },
+  emptyTranscriptState: {
+    padding: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyTranscriptText: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
+  },
+  emptyTranscriptSubtext: {
+    fontSize: 12,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    opacity: 0.7,
+  },
+  realtimeTranscripts: {
+    gap: spacing.sm,
+  },
+  webhookTestSection: {
+    backgroundColor: `${colors.accent.warning}08`,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: `${colors.accent.warning}30`,
+  },
+  webhookTestTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.accent.warning,
+    marginBottom: spacing.sm,
+    textAlign: 'center',
+  },
+  webhookTestButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: spacing.xs,
+  },
+  webhookTestButton: {
+    flex: 1,
+    backgroundColor: `${colors.accent.warning}15`,
+    borderRadius: borderRadius.sm,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: `${colors.accent.warning}30`,
+  },
+  webhookTestButtonText: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: colors.accent.warning,
+    textAlign: 'center',
+  },
+  realtimeSegment: {
+    backgroundColor: colors.background.card,
+    padding: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary.main,
+  },
+  realtimeText: {
+    ...typography.body,
+    color: colors.text.primary,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: spacing.xs,
+  },
+  realtimeTimestamp: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    fontSize: 10,
+  },
+  realtimeMore: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    fontStyle: 'italic',
+    marginTop: spacing.xs,
+  },
   transcriptsList: {
     flex: 1,
   },
@@ -1680,7 +2098,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   reportTitle: {
     fontSize: 18,
-    fontWeight: '450',
+    fontWeight: '500',
     marginBottom: spacing.sm,
     color: colors.text.primary,
   },
@@ -1691,7 +2109,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   reportSection: {
     marginTop: spacing.md,
-    fontWeight: '450',
+    fontWeight: '500',
     color: colors.text.primary,
   },
   reportBody: {
@@ -1719,30 +2137,9 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   reportTitleInline: {
     fontSize: 16,
-    fontWeight: '450',
+    fontWeight: '500',
     marginBottom: spacing.xs,
     color: colors.text.primary,
-  },
-  reportMeta: {
-    ...typography.caption,
-    color: colors.text.secondary,
-    marginBottom: 2,
-  },
-  reportSection: {
-    marginTop: spacing.sm,
-    fontWeight: '450',
-    color: colors.text.primary,
-  },
-  reportBody: {
-    ...typography.body,
-    color: colors.text.primary,
-    marginTop: 4,
-  },
-  reportFooter: {
-    ...typography.caption,
-    color: colors.text.disabled,
-    marginTop: spacing.sm,
-    textAlign: 'center',
   },
 
   // New Action Container Styles
