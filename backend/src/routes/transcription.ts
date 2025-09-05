@@ -185,10 +185,36 @@ router.post('/transcribe/text', async (req: Request, res: Response) => {
     let transcriptionText = fullTranscript;
     
     if (!transcriptionText && transcriptSegments && Array.isArray(transcriptSegments)) {
-      // Combine segments like webhookTranscription does
+      // Apply speaker consolidation using speaker_id when available (same as webhookTranscription)
+      const speakerMap = new Map<string, string>();
+      const speakerIdMapping = new Map<number, string>();
+      let nextSpeakerId = 1;
+      
+      // First, map all unique speaker_ids to consolidated names
+      transcriptSegments.forEach((segment: any) => {
+        if (segment.speaker_id !== undefined && !speakerIdMapping.has(segment.speaker_id)) {
+          speakerIdMapping.set(segment.speaker_id, `Speaker ${nextSpeakerId}`);
+          nextSpeakerId++;
+        }
+      });
+      
+      // Create the main speakerMap for both speaker_id based and speaker field based mapping
+      transcriptSegments.forEach((segment: any) => {
+        if (segment.speaker_id !== undefined) {
+          // Use speaker_id for consolidation
+          const consolidatedName = speakerIdMapping.get(segment.speaker_id)!;
+          speakerMap.set(segment.speaker, consolidatedName); // Map the speaker field to consolidated name
+        } else if (segment.speaker && !speakerMap.has(segment.speaker)) {
+          // Fallback for segments without speaker_id
+          speakerMap.set(segment.speaker, `Speaker ${nextSpeakerId}`);
+          nextSpeakerId++;
+        }
+      });
+
+      // Combine segments with consolidated speaker names
       transcriptionText = transcriptSegments
         .map((segment: any) => {
-          const speaker = segment.speaker ? `${segment.speaker}: ` : '';
+          const speaker = segment.speaker ? `${speakerMap.get(segment.speaker) || segment.speaker}: ` : '';
           const timing = segment.start && segment.end ? ` [${segment.start.toFixed(1)}s - ${segment.end.toFixed(1)}s]` : '';
           return `${speaker}${segment.text}${timing}`;
         })
