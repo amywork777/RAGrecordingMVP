@@ -17,6 +17,7 @@ const getZeroEntropyClient = () => {
 
 interface WebhookTranscriptSegment {
   speaker: string;
+  speaker_id?: number;
   text: string;
   start: number;
   end: number;
@@ -57,15 +58,35 @@ router.post('/store', async (req: Request, res: Response) => {
     console.log(`📝 Storing webhook transcription for recording: ${recordingId}`);
     console.log(`📊 Processing ${transcriptSegments.length} transcript segments`);
 
-    // Create a speaker mapping to consolidate speaker IDs
+    // Create a speaker mapping using the speaker_id field when available
     const speakerMap = new Map<string, string>();
-    let speakerCounter = 1;
-
-    // Process segments to create consolidated speaker mapping
+    
+    // Use speaker_id if available for consolidation, otherwise fall back to speaker field
+    const speakerIdMapping = new Map<number, string>();
+    let nextSpeakerId = 1;
+    
+    // First, map all unique speaker_ids to consolidated names
     transcriptSegments.forEach(segment => {
-      if (segment.speaker && !speakerMap.has(segment.speaker)) {
-        speakerMap.set(segment.speaker, `Speaker ${speakerCounter}`);
-        speakerCounter++;
+      if (segment.speaker_id !== undefined && !speakerIdMapping.has(segment.speaker_id)) {
+        speakerIdMapping.set(segment.speaker_id, `Speaker ${nextSpeakerId}`);
+        nextSpeakerId++;
+      }
+    });
+    
+    // Log the speaker ID mapping
+    const speakerIdEntries = Array.from(speakerIdMapping.entries());
+    console.log(`🎤 Speaker ID mapping: ${speakerIdEntries.map(([id, name]) => `${id}→${name}`).join(', ')}`);
+    
+    // Now create the main speakerMap for both speaker_id based and speaker field based mapping
+    transcriptSegments.forEach(segment => {
+      if (segment.speaker_id !== undefined) {
+        // Use speaker_id for consolidation
+        const consolidatedName = speakerIdMapping.get(segment.speaker_id)!;
+        speakerMap.set(segment.speaker, consolidatedName); // Map the speaker field to consolidated name
+      } else if (segment.speaker && !speakerMap.has(segment.speaker)) {
+        // Fallback for segments without speaker_id
+        speakerMap.set(segment.speaker, `Speaker ${nextSpeakerId}`);
+        nextSpeakerId++;
       }
     });
 
