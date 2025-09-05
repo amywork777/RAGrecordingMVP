@@ -452,7 +452,7 @@ class WebhookService extends EventEmitter {
         timestamp: transcript.timestamp || new Date().toISOString()
       }));
 
-      const response = await fetch('https://backend-m701ltm1i-amy-zhous-projects-45e75853.vercel.app/api/webhook-transcription/store', {
+      const response = await fetch('https://backend-r466156gz-amy-zhous-projects-45e75853.vercel.app/api/webhook-transcription/store', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -92,6 +92,7 @@ export default function RecordScreen({ route }: any) {
 
   // Webhook integration states
   const [isWebhookMonitoring, setIsWebhookMonitoring] = useState(false);
+  const [isTranscriptionCollapsed, setIsTranscriptionCollapsed] = useState(false);
   const [isHardwareRecording, setIsHardwareRecording] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [realtimeTranscripts, setRealtimeTranscripts] = useState<any[]>([]);
@@ -479,37 +480,83 @@ export default function RecordScreen({ route }: any) {
     const fullText = conversation.transcripts.map((t: any) => t.text).join(' ');
     
     if (fullText.trim().length > 0) {
-      const newTranscript: Transcript = {
+      // Initial transcript with temporary title
+      const tempTranscript: Transcript = {
         id: conversation.id,
         text: fullText,
-        title: `Hardware Recording ${conversation.startTime}`,
+        title: 'Generating AI title...',
         summary: data.summary,
         timestamp: new Date(conversation.startTime),
-        aiTitle: `Hardware Recording ${new Date(conversation.startTime).toLocaleDateString()}`,
+        aiTitle: 'Generating AI title...',
         aiSummary: data.summary,
         durationSeconds: Math.floor((new Date(conversation.endTime).getTime() - new Date(conversation.startTime).getTime()) / 1000),
         source: 'hardware',
       };
       
-      setTranscripts(prev => [newTranscript, ...prev]);
-      setFilteredTranscripts(prev => [newTranscript, ...prev]);
+      setTranscripts(prev => [tempTranscript, ...prev]);
+      setFilteredTranscripts(prev => [tempTranscript, ...prev]);
       
-      // Also save to backend
+      // Save to backend and get AI-generated title
       try {
-        await APIService.uploadTextDocument(fullText, {
-          path: `hardware/recordings/${conversation.id}`,
-          metadata: { 
-            source: 'hardware', 
-            conversationId: conversation.id,
-            summary: data.summary,
-            startTime: conversation.startTime,
-            endTime: conversation.endTime,
+        // Convert transcript segments format for webhook API
+        const transcriptSegments = conversation.transcripts.map((t: any, index: number) => ({
+          speaker: `Speaker ${index + 1}`,
+          text: t.text,
+          start: index * 3, // Estimate timing
+          end: (index + 1) * 3,
+          confidence: t.confidence || 0.8,
+          timestamp: t.timestamp || new Date().toISOString()
+        }));
+
+        const response = await fetch('https://backend-r466156gz-amy-zhous-projects-45e75853.vercel.app/api/webhook-transcription/store', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
           },
-          collectionName: 'ai-wearable-transcripts',
+          body: JSON.stringify({
+            recordingId: conversation.id,
+            sessionId: conversation.id,
+            transcriptSegments,
+            metadata: {
+              source: 'hardware-mobile-app',
+              deviceId: 'mobile-device',
+              startTime: conversation.startTime,
+              endTime: conversation.endTime
+            }
+          })
         });
-        console.log('Hardware recording saved to backend');
+
+        if (response.ok) {
+          const result = await response.json();
+          console.log('✅ Backend returned AI title:', result.title);
+          
+          // Update transcript with AI-generated title
+          const updatedTranscript: Transcript = {
+            ...tempTranscript,
+            title: result.title || 'Hardware Recording',
+            aiTitle: result.title || 'Hardware Recording',
+            summary: result.summary || data.summary,
+            aiSummary: result.summary || data.summary,
+          };
+          
+          // Update the transcript in state
+          setTranscripts(prev => prev.map(t => t.id === conversation.id ? updatedTranscript : t));
+          setFilteredTranscripts(prev => prev.map(t => t.id === conversation.id ? updatedTranscript : t));
+          
+          console.log('Hardware recording saved with AI title:', result.title);
+        } else {
+          console.error('Failed to get AI title from backend:', response.statusText);
+          // Update with fallback title
+          const fallbackTranscript = { ...tempTranscript, title: 'Hardware Recording', aiTitle: 'Hardware Recording' };
+          setTranscripts(prev => prev.map(t => t.id === conversation.id ? fallbackTranscript : t));
+          setFilteredTranscripts(prev => prev.map(t => t.id === conversation.id ? fallbackTranscript : t));
+        }
       } catch (error) {
         console.error('Failed to save hardware recording to backend:', error);
+        // Update with fallback title
+        const fallbackTranscript = { ...tempTranscript, title: 'Hardware Recording', aiTitle: 'Hardware Recording' };
+        setTranscripts(prev => prev.map(t => t.id === conversation.id ? fallbackTranscript : t));
+        setFilteredTranscripts(prev => prev.map(t => t.id === conversation.id ? fallbackTranscript : t));
       }
     }
     
@@ -1254,7 +1301,10 @@ export default function RecordScreen({ route }: any) {
           {/* Webhook Transcription Monitor */}
           {isWebhookMonitoring && (
             <View style={styles.realtimeSection}>
-              <View style={styles.realtimeHeader}>
+              <TouchableOpacity 
+                style={styles.realtimeHeader} 
+                onPress={() => setIsTranscriptionCollapsed(!isTranscriptionCollapsed)}
+              >
                 <Ionicons name="radio" size={16} color={isHardwareRecording ? colors.accent.main : colors.primary.main} />
                 <Text style={styles.realtimeSectionTitle}>
                   {isHardwareRecording ? '🔴 Recording' : '👂 Listening'} for Transcripts
@@ -1263,73 +1313,55 @@ export default function RecordScreen({ route }: any) {
                   <ActivityIndicator size="small" color={colors.primary.main} />
                   <Text style={styles.statusText}>LIVE</Text>
                 </View>
-              </View>
+                <Ionicons 
+                  name={isTranscriptionCollapsed ? 'chevron-down' : 'chevron-up'} 
+                  size={16} 
+                  color={colors.text.secondary} 
+                  style={{ marginLeft: 8 }}
+                />
+              </TouchableOpacity>
               
-              {realtimeTranscripts.length > 0 ? (
-                <ScrollView style={styles.transcriptContainer} nestedScrollEnabled>
-                  {realtimeTranscripts.slice(-10).map((segment, index) => (
-                    <View key={`${segment.id || index}-${segment.receivedAt?.getTime()}`} style={styles.transcriptSegment}>
-                      <View style={styles.transcriptHeader}>
-                        <Text style={styles.transcriptTime}>
-                          {segment.receivedAt ? segment.receivedAt.toLocaleTimeString() : 'Now'}
-                        </Text>
-                        {segment.speaker && (
-                          <Text style={styles.transcriptSpeaker}>{segment.speaker}</Text>
-                        )}
-                        {segment.confidence && (
-                          <Text style={styles.transcriptConfidence}>
-                            {Math.round(segment.confidence * 100)}%
+              {!isTranscriptionCollapsed && (
+                realtimeTranscripts.length > 0 ? (
+                  <ScrollView style={styles.transcriptContainer} nestedScrollEnabled>
+                    {realtimeTranscripts.slice(-10).map((segment, index) => (
+                      <View key={`${segment.id || index}-${segment.receivedAt?.getTime()}`} style={styles.transcriptSegment}>
+                        <View style={styles.transcriptHeader}>
+                          <Text style={styles.transcriptTime}>
+                            {segment.receivedAt ? segment.receivedAt.toLocaleTimeString() : 'Now'}
                           </Text>
-                        )}
+                          {segment.speaker && (
+                            <Text style={styles.transcriptSpeaker}>{segment.speaker}</Text>
+                          )}
+                          {segment.confidence && (
+                            <Text style={styles.transcriptConfidence}>
+                              {Math.round(segment.confidence * 100)}%
+                            </Text>
+                          )}
+                        </View>
+                        <Text style={styles.transcriptText}>{segment.text}</Text>
                       </View>
-                      <Text style={styles.transcriptText}>{segment.text}</Text>
-                    </View>
-                  ))}
-                  {realtimeTranscripts.length > 10 && (
-                    <Text style={styles.realtimeMore}>
-                      +{realtimeTranscripts.length - 10} earlier transcripts...
+                    ))}
+                    {realtimeTranscripts.length > 10 && (
+                      <Text style={styles.realtimeMore}>
+                        +{realtimeTranscripts.length - 10} earlier transcripts...
+                      </Text>
+                    )}
+                  </ScrollView>
+                ) : (
+                  <View style={styles.emptyTranscriptState}>
+                    <Text style={styles.emptyTranscriptText}>
+                      Waiting for transcription data from webhook...
                     </Text>
-                  )}
-                </ScrollView>
-              ) : (
-                <View style={styles.emptyTranscriptState}>
-                  <Text style={styles.emptyTranscriptText}>
-                    Waiting for transcription data from webhook...
-                  </Text>
-                  <Text style={styles.emptyTranscriptSubtext}>
-                    Send audio to trigger hardware transcription
-                  </Text>
-                </View>
+                    <Text style={styles.emptyTranscriptSubtext}>
+                      Send audio to trigger hardware transcription
+                    </Text>
+                  </View>
+                )
               )}
             </View>
           )}
 
-          {/* Webhook Testing (Development) */}
-          {__DEV__ && isWebhookMonitoring && (
-            <View style={styles.webhookTestSection}>
-              <Text style={styles.webhookTestTitle}>🧪 Webhook Testing</Text>
-              <View style={styles.webhookTestButtons}>
-                <TouchableOpacity
-                  style={styles.webhookTestButton}
-                  onPress={() => WebhookService.simulateWebhookTranscription('Hello! This is a simulated transcription from hardware.')}
-                >
-                  <Text style={styles.webhookTestButtonText}>Add Test Transcript</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.webhookTestButton}
-                  onPress={() => WebhookService.simulateRecordingStart()}
-                >
-                  <Text style={styles.webhookTestButtonText}>Start Recording</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.webhookTestButton}
-                  onPress={() => WebhookService.simulateRecordingEnd()}
-                >
-                  <Text style={styles.webhookTestButtonText}>End Recording</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
 
           <ScrollView 
             ref={scrollViewRef}

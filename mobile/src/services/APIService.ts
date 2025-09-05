@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 
 function deriveDefaultBaseUrl(): string {
   // NEW WORKING BACKEND URL - Fixed deployment with transcription fix
-  const PRODUCTION_URL = 'https://backend-henna-tau-11.vercel.app';
+  const PRODUCTION_URL = 'https://backend-r466156gz-amy-zhous-projects-45e75853.vercel.app';
   
   console.log('=== API URL DERIVATION DEBUG ===');
   console.log('process.env.EXPO_PUBLIC_API_URL:', process.env.EXPO_PUBLIC_API_URL);
@@ -66,7 +66,7 @@ console.log('__DEV__:', __DEV__);
 
 // Fallback URL helper
 async function fetchWithFallback(url: string, options: RequestInit): Promise<Response> {
-  const PRODUCTION_URL = 'https://backend-1wk0gid4c-amy-zhous-projects-45e75853.vercel.app';
+  const PRODUCTION_URL = 'https://backend-r466156gz-amy-zhous-projects-45e75853.vercel.app';
   const LOCAL_URL = 'http://localhost:3000';
   
   try {

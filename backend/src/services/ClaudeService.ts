@@ -1,13 +1,19 @@
+import OpenAI from 'openai';
+
 class ClaudeService {
-  private apiKey?: string;
+  private openai?: OpenAI;
 
   constructor() {
-    this.apiKey = process.env.ANTHROPIC_API_KEY;
+    if (process.env.OPENAI_API_KEY) {
+      this.openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+      });
+    }
   }
 
   async generateSummary(transcriptText: string): Promise<string> {
     const trimmed = (transcriptText || '').trim();
-    if (!this.apiKey) {
+    if (!this.openai) {
       // Fallback lightweight heuristic summary if no API key configured
       if (trimmed.length === 0) {
         return 'The recording did not contain any speech or detectable audio content.';
@@ -17,40 +23,21 @@ class ClaudeService {
     }
 
     try {
-      const body = {
-        model: 'claude-3-haiku-20240307',
+      const completion = await this.openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
         max_tokens: 300,
         messages: [
           {
             role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: `Summarize the following transcript in 1-2 sentences. If there is no speech or the content is empty, say: "The recording did not contain any speech or detectable audio content."\n\nTranscript:\n${trimmed}`,
-              },
-            ],
+            content: `Summarize the following transcript in 1-2 sentences. If there is no speech or the content is empty, say: "The recording did not contain any speech or detectable audio content."\n\nTranscript:\n${trimmed}`,
           },
         ],
-      };
-
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify(body),
       });
 
-      if (!resp.ok) {
-        throw new Error(`Anthropic API error: ${resp.status} ${resp.statusText}`);
-      }
-
-      const data: any = await resp.json();
-      const content = Array.isArray(data?.content) && data.content[0]?.text ? data.content[0].text : '';
-      if (content) return content.trim();
-      // Fallback if unexpected shape
+      const content = completion.choices[0]?.message?.content?.trim();
+      if (content) return content;
+      
+      // Fallback if unexpected response
       return trimmed.length === 0
         ? 'The recording did not contain any speech or detectable audio content.'
         : trimmed.slice(0, 220) + (trimmed.length > 220 ? '…' : '');
@@ -78,21 +65,18 @@ class ClaudeService {
       return { title, summary };
     };
 
-    if (!this.apiKey) {
+    if (!this.openai) {
       return fallback();
     }
 
     try {
-      const body = {
-        model: 'claude-3-haiku-20240307',
+      const completion = await this.openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
         max_tokens: 350,
         messages: [
           {
             role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: `You are an expert at creating compelling, specific titles and summaries for voice recordings and transcribed conversations. 
+            content: `You are an expert at creating compelling, specific titles and summaries for voice recordings and transcribed conversations. 
 
 Create a JSON response with:
 1. A compelling, specific title (35-45 characters) that captures the main topic, key insight, or most interesting aspect. Avoid generic words like "discussion", "conversation", "recording", "meeting". Focus on the actual subject matter.
@@ -113,34 +97,27 @@ Transcript:
 ${trimmed}
 
 Return strictly a JSON object:`,
-              },
-            ],
           },
         ],
-      };
-
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify(body),
       });
 
-      if (!resp.ok) {
-        throw new Error(`Anthropic API error: ${resp.status} ${resp.statusText}`);
-      }
-
-      const data: any = await resp.json();
-      const text = Array.isArray(data?.content) && data.content[0]?.text ? data.content[0].text : '';
-      try {
-        const parsed = JSON.parse(text);
-        if (parsed && typeof parsed.title === 'string' && typeof parsed.summary === 'string') {
-          return { title: parsed.title.trim(), summary: parsed.summary.trim() };
+      const content = completion.choices[0]?.message?.content?.trim();
+      if (content) {
+        console.log('🤖 Raw OpenAI response:', content);
+        try {
+          const parsed = JSON.parse(content);
+          console.log('🤖 Parsed JSON:', parsed);
+          if (parsed && typeof parsed.title === 'string' && typeof parsed.summary === 'string') {
+            console.log('✅ Valid title/summary extracted:', { title: parsed.title.trim(), summary: parsed.summary.trim() });
+            return { title: parsed.title.trim(), summary: parsed.summary.trim() };
+          } else {
+            console.warn('⚠️ Invalid parsed structure:', parsed);
+          }
+        } catch (parseError) {
+          console.error('❌ JSON parsing failed:', parseError, 'Content:', content);
         }
-      } catch {}
+      }
+      
       // If not parseable, fallback to single summary path
       const summary = await this.generateSummary(trimmed);
       const { title } = fallback();
