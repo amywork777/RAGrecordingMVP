@@ -74,7 +74,8 @@ class ZeroEntropySimpleService {
           });
         } else {
           // Use document list endpoint for recent transcripts (no query)
-          console.log(`[ZeroEntropy] Fetching recent documents`);
+          // First try to get new format recordings (hardware-recordings/)
+          console.log(`[ZeroEntropy] Fetching recent documents from new path structure`);
           response = await fetch(`https://api.zeroentropy.dev/v1/documents/get-document-info-list`, {
             method: 'POST',
             headers: {
@@ -83,8 +84,8 @@ class ZeroEntropySimpleService {
             },
             body: JSON.stringify({
               collection_name: 'ai-wearable-transcripts',
-              limit: Math.max(limit || 10, 200), // Get many more documents to ensure we catch recent ones
-              path_prefix: null,
+              limit: Math.max(limit || 10, 200),
+              path_prefix: 'hardware-recordings/',
               path_gt: null,
             }),
           });
