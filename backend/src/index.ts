@@ -9,6 +9,7 @@ import searchRoutes from './routes/search';
 import zeroEntropyRoutes from './routes/zeroentropy';
 import chatRoutes from './routes/chat';
 import webhookProxyRoutes from './routes/webhookProxy';
+import webhookTranscriptionRoutes from './routes/webhookTranscription';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -67,6 +68,7 @@ app.use('/api', searchRoutes);
 app.use('/api/zeroentropy', zeroEntropyRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/webhook-proxy', webhookProxyRoutes);
+app.use('/api/webhook-transcription', webhookTranscriptionRoutes);
 // Alias for summary endpoint under /api
 // Note: The summary route is defined in searchRoutes as POST /summary
 

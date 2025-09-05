@@ -68,6 +68,7 @@ class WebhookService extends EventEmitter {
   private currentConversation: Conversation | null = null;
   private pollingDelay = 2000; // Start with 2 seconds
   private readonly MAX_POLLING_DELAY = 30000; // Max 30 seconds
+  private pendingSegments: TranscriptSegment[] = []; // Store segments for batch sending
 
   // Webhook URLs
   private readonly AUDIO_BYTES_WEBHOOK = 'https://webhook.site/d82d2c53-b568-4ac7-a9b9-808ce52fde1f';
@@ -111,13 +112,21 @@ class WebhookService extends EventEmitter {
 
   private async fetchWebhookData(webhookUrl: string): Promise<WebhookData[]> {
     try {
-      // Use Vercel proxy for all environments (development and production)
-      // This ensures consistent behavior and avoids local network issues
-      const proxyUrl = `https://v0-react-transcription-monitor.vercel.app/api/webhook-proxy?url=${encodeURIComponent(webhookUrl)}&apiKey=debd5467-1359-4403-93d1-4260374cede0`;
-      console.log(`🌐 UNIVERSAL: Fetching via Vercel proxy: ${proxyUrl}`);
+      // Convert webhook URL to token API format like the working webapp
+      const tokenMatch = webhookUrl.match(/webhook\.site\/([^\/]+)/);
+      if (!tokenMatch) {
+        throw new Error('Invalid webhook URL format');
+      }
+      
+      const token = tokenMatch[1];
+      const tokenApiUrl = `https://webhook.site/token/${token}/requests?sorting=newest&size=10`;
+      
+      // Use Vercel proxy with token API URL
+      const proxyUrl = `https://v0-react-transcription-monitor.vercel.app/api/webhook-proxy?url=${encodeURIComponent(tokenApiUrl)}&apiKey=debd5467-1359-4403-93d1-4260374cede0`;
+      console.log(`🌐 TOKEN API: Fetching via proxy with token format: ${proxyUrl}`);
       return this.fetchViaProxy(proxyUrl);
     } catch (error) {
-      console.log(`❌ Webhook fetch failed: ${error.message}`);
+      console.log(`❌ Token API fetch failed: ${error.message}`);
       // Fallback to direct webhook.site access if proxy fails
       console.log(`🔄 Attempting direct fallback...`);
       try {
@@ -415,6 +424,9 @@ class WebhookService extends EventEmitter {
         conversation.summary = `Summary of ${conversation.transcripts.length} segments recorded from ${conversation.startTime.toLocaleString()} to ${conversation.endTime?.toLocaleString()}`;
       }
 
+      // Store the complete conversation in backend
+      await this.storeConversationToBackend(conversation);
+
       this.emit('conversationSummarized', {
         conversationId: conversation.id,
         summary: conversation.summary,
@@ -423,6 +435,73 @@ class WebhookService extends EventEmitter {
     } catch (error) {
       console.error('Failed to generate conversation summary:', error);
       conversation.summary = 'Summary generation failed.';
+    }
+  }
+
+  // Store transcription segments to backend API in the same format as regular recordings
+  private async storeConversationToBackend(conversation: Conversation) {
+    try {
+      console.log(`💾 Storing conversation ${conversation.id} to backend...`);
+      
+      const transcriptSegments = conversation.transcripts.map(transcript => ({
+        speaker: transcript.speaker || 'SPEAKER_UNKNOWN',
+        text: transcript.text,
+        start: transcript.timestamp ? new Date(transcript.timestamp).getTime() / 1000 : 0,
+        end: transcript.timestamp ? (new Date(transcript.timestamp).getTime() / 1000) + 3 : 3, // Estimate 3-second segments
+        confidence: transcript.confidence || 0.8,
+        timestamp: transcript.timestamp || new Date().toISOString()
+      }));
+
+      const response = await fetch('https://backend-m701ltm1i-amy-zhous-projects-45e75853.vercel.app/api/webhook-transcription/store', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recordingId: conversation.id,
+          sessionId: conversation.id,
+          transcriptSegments,
+          metadata: {
+            source: 'hardware-webhook-mobile',
+            deviceId: 'mobile-device', // You might want to get actual device ID
+            startTime: conversation.startTime.toISOString(),
+            endTime: conversation.endTime?.toISOString(),
+            duration: conversation.endTime ? 
+              (conversation.endTime.getTime() - conversation.startTime.getTime()) / 1000 : undefined,
+            segmentCount: transcriptSegments.length
+          }
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log(`✅ Stored conversation to backend:`, result);
+        console.log(`📝 Title: "${result.title}"`);
+        console.log(`📄 Summary: "${result.summary}"`);
+        
+        // Update conversation with backend-generated title/summary
+        conversation.title = result.title;
+        conversation.summary = result.summary;
+        
+      } else {
+        const error = await response.text();
+        console.error(`❌ Failed to store conversation to backend:`, error);
+      }
+
+    } catch (error) {
+      console.error('💥 Error storing conversation to backend:', error.message);
+      // Don't throw - allow the conversation to continue without backend storage
+    }
+  }
+
+  // Add segments to pending batch for incremental storage
+  private addToPendingSegments(segments: TranscriptSegment[]) {
+    this.pendingSegments.push(...segments);
+    console.log(`📝 Added ${segments.length} segments to pending batch. Total pending: ${this.pendingSegments.length}`);
+    
+    // Store segments when we have enough or after a delay
+    if (this.pendingSegments.length >= 5) {
+      this.storePendingSegments();
     }
   }
 
