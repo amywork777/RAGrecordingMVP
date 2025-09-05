@@ -1,0 +1,13 @@
+{
+  "name": "webhook-proxy-vercel",
+  "version": "1.0.0",
+  "description": "Vercel serverless proxy for webhook.site API access",
+  "main": "api/webhook-proxy.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "devDependencies": {
+    "vercel": "^47.0.5"
+  }
+}

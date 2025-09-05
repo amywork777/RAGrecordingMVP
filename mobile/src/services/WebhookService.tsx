@@ -38,6 +38,7 @@ interface TranscriptSegment {
   language?: string;
   timestamp?: string;
   id?: string;
+  receivedAt?: Date;
 }
 
 interface WebhookData {
@@ -55,6 +56,7 @@ interface Conversation {
   transcripts: TranscriptSegment[];
   status: "recording" | "completed";
   summary?: string;
+  title?: string;
 }
 
 class WebhookService extends EventEmitter {
@@ -66,6 +68,13 @@ class WebhookService extends EventEmitter {
   private processedRequestIds = new Set<string>();
   private processedSegmentIds = new Set<string>();
   private currentConversation: Conversation | null = null;
+  
+  // Live transcription accumulation
+  private currentSessionId: string | null = null;
+  private accumulatedTranscripts: TranscriptSegment[] = [];
+  private silenceTimeoutRef: NodeJS.Timeout | null = null;
+  private readonly SILENCE_TIMEOUT = 10000; // 10 seconds
+  private lastTranscriptTime = 0;
   private pollingDelay = 2000; // Start with 2 seconds
   private readonly MAX_POLLING_DELAY = 30000; // Max 30 seconds
   private pendingSegments: TranscriptSegment[] = []; // Store segments for batch sending
@@ -349,7 +358,7 @@ class WebhookService extends EventEmitter {
       }
 
       if (newSegments.length > 0) {
-        this.handleNewTranscripts(newSegments);
+        this.handleNewTranscriptsLive(newSegments);
         await this.persistData();
       }
     } catch (error) {
@@ -374,43 +383,126 @@ class WebhookService extends EventEmitter {
     });
   }
 
-  private handleNewTranscripts(segments: TranscriptSegment[]) {
-    console.log(`📝 Received ${segments.length} new transcript segments`);
-    
-    // Add to current conversation if recording
-    if (this.currentConversation && this.currentConversation.status === 'recording') {
-      this.currentConversation.transcripts.push(...segments);
+  private handleNewTranscriptsLive(segments: TranscriptSegment[]) {
+    if (!this.currentConversation) {
+      console.log('⚠️ No active conversation for new transcripts - creating one');
+      this.handleRecordingStart();
     }
 
-    this.emit('transcriptionUpdate', {
-      segments,
-      conversationId: this.currentConversation?.id,
-      isRecording: this.currentConversation?.status === 'recording',
+    const now = Date.now();
+    this.lastTranscriptTime = now;
+
+    // Extract session ID from first segment
+    const sessionId = segments[0]?.session_id || segments[0]?.id || 'default-session';
+    
+    // If this is a new session, finalize the previous one
+    if (this.currentSessionId && this.currentSessionId !== sessionId && this.accumulatedTranscripts.length > 0) {
+      console.log('📝 New session detected, finalizing previous session:', this.currentSessionId);
+      this.finalizeAccumulatedTranscription();
+    }
+
+    this.currentSessionId = sessionId;
+    
+    // Add new segments to accumulation
+    segments.forEach(segment => {
+      this.accumulatedTranscripts.push({
+        ...segment,
+        receivedAt: new Date()
+      });
+      
+      // Also add to current conversation for real-time display
+      if (this.currentConversation) {
+        this.currentConversation.transcripts.push({
+          ...segment,
+          receivedAt: new Date()
+        });
+      }
     });
+
+    // Emit live update event for real-time display
+    this.emit('liveTranscript', {
+      segments,
+      totalSegments: this.accumulatedTranscripts.length,
+      sessionId: this.currentSessionId,
+      accumulatedText: this.accumulatedTranscripts.map(s => s.text).join(' ')
+    });
+
+    console.log(`📊 Live transcript update: ${segments.length} new, ${this.accumulatedTranscripts.length} total`);
+
+    // Reset silence timeout - restart the 10-second countdown
+    this.resetSilenceTimeout();
   }
 
-  private handleRecordingEnd(reason: 'no_audio_timeout' | 'manual_stop' | 'device_off') {
-    console.log(`⏹️ Recording ended - reason: ${reason}`);
-    
-    if (this.currentConversation && this.currentConversation.status === 'recording') {
-      this.currentConversation.status = 'completed';
-      this.currentConversation.endTime = new Date();
-
-      this.emit('recordingEnded', {
-        conversation: this.currentConversation,
-        reason,
-        duration: this.currentConversation.endTime.getTime() - this.currentConversation.startTime.getTime(),
-      });
-
-      // Trigger summarization
-      this.generateConversationSummary(this.currentConversation);
+  private resetSilenceTimeout() {
+    // Clear existing timeout
+    if (this.silenceTimeoutRef) {
+      clearTimeout(this.silenceTimeoutRef);
     }
 
+    // Set new 10-second timeout
+    this.silenceTimeoutRef = setTimeout(() => {
+      console.log('⏰ 10 seconds of silence detected - finalizing transcription');
+      this.finalizeAccumulatedTranscription();
+    }, this.SILENCE_TIMEOUT);
+  }
+
+  private async finalizeAccumulatedTranscription() {
+    if (this.accumulatedTranscripts.length === 0) {
+      console.log('⚠️ No accumulated transcripts to finalize');
+      return;
+    }
+
+    console.log(`🎯 Finalizing accumulated transcription with ${this.accumulatedTranscripts.length} segments`);
+
+    // Clear silence timeout
+    if (this.silenceTimeoutRef) {
+      clearTimeout(this.silenceTimeoutRef);
+      this.silenceTimeoutRef = null;
+    }
+
+    // Create final conversation object
+    const finalConversation: Conversation = {
+      id: this.currentSessionId || Date.now().toString(),
+      startTime: this.accumulatedTranscripts[0]?.receivedAt || new Date(),
+      endTime: new Date(),
+      transcripts: [...this.accumulatedTranscripts],
+      status: 'completed'
+    };
+
+    // Store conversation to backend for AI title/summary generation
+    await this.storeConversationToBackend(finalConversation);
+
+    // Emit conversation completed event (this will trigger UI updates)
+    this.emit('conversationCompleted', {
+      conversation: finalConversation,
+      summary: `Live transcription completed with ${this.accumulatedTranscripts.length} segments`
+    });
+
+    console.log(`✅ Conversation finalized: ${finalConversation.id} (${this.accumulatedTranscripts.length} segments)`);
+
+    // Reset for next session
+    this.accumulatedTranscripts = [];
+    this.currentSessionId = null;
+    this.currentConversation = null;
+  }
+
+
+  private handleRecordingEnd(reason: 'no_audio_timeout' | 'manual_stop' | 'device_off') {
+    console.log(`⏹️ Recording ended - reason: ${reason} (now handled by live accumulation system)`);
+    
+    // The live accumulation system now handles conversation completion
+    // This method just cleans up the old audio timeout system
+    
     // Clear timeout if exists
     if (this.audioTimeoutRef) {
       clearTimeout(this.audioTimeoutRef);
       this.audioTimeoutRef = null;
     }
+
+    this.emit('recordingEnded', {
+      reason,
+      message: 'Recording ended, live accumulation system will handle completion'
+    });
   }
 
   private async generateConversationSummary(conversation: Conversation) {
@@ -441,18 +533,34 @@ class WebhookService extends EventEmitter {
   // Store transcription segments to backend API in the same format as regular recordings
   private async storeConversationToBackend(conversation: Conversation) {
     try {
-      console.log(`💾 Storing conversation ${conversation.id} to backend...`);
+      console.log(`💾 Storing conversation ${conversation.id} to backend with ${conversation.transcripts.length} segments...`);
+      console.log(`🎯 Full conversation data:`, JSON.stringify(conversation, null, 2));
       
       const transcriptSegments = conversation.transcripts.map(transcript => ({
         speaker: transcript.speaker || 'SPEAKER_UNKNOWN',
         text: transcript.text,
-        start: transcript.timestamp ? new Date(transcript.timestamp).getTime() / 1000 : 0,
-        end: transcript.timestamp ? (new Date(transcript.timestamp).getTime() / 1000) + 3 : 3, // Estimate 3-second segments
+        start: transcript.start || 0,
+        end: transcript.end || (transcript.start ? transcript.start + 3 : 3), // Use actual timing or estimate
         confidence: transcript.confidence || 0.8,
         timestamp: transcript.timestamp || new Date().toISOString()
       }));
 
-      const response = await fetch('https://backend-r466156gz-amy-zhous-projects-45e75853.vercel.app/api/webhook-transcription/store', {
+      console.log(`📤 Sending to backend:`, JSON.stringify({
+        recordingId: conversation.id,
+        sessionId: conversation.id,
+        transcriptSegments,
+        metadata: {
+          source: 'hardware-webhook-mobile',
+          deviceId: 'mobile-device',
+          startTime: conversation.startTime.toISOString(),
+          endTime: conversation.endTime?.toISOString(),
+          duration: conversation.endTime ? 
+            (conversation.endTime.getTime() - conversation.startTime.getTime()) / 1000 : undefined,
+          segmentCount: transcriptSegments.length
+        }
+      }, null, 2));
+
+      const response = await fetch('https://backend-kexb4s6xd-amy-zhous-projects-45e75853.vercel.app/api/webhook-transcription/store', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -555,6 +663,18 @@ class WebhookService extends EventEmitter {
       this.audioTimeoutRef = null;
     }
 
+    // Clear silence timeout for live transcription accumulation
+    if (this.silenceTimeoutRef) {
+      clearTimeout(this.silenceTimeoutRef);
+      this.silenceTimeoutRef = null;
+    }
+
+    // Finalize any accumulated transcription before stopping
+    if (this.accumulatedTranscripts.length > 0) {
+      console.log('🎯 Finalizing accumulated transcription before stopping monitoring');
+      this.finalizeAccumulatedTranscription();
+    }
+
     // End current recording if active
     if (this.currentConversation && this.currentConversation.status === 'recording') {
       this.handleRecordingEnd('manual_stop');
@@ -604,7 +724,7 @@ class WebhookService extends EventEmitter {
       timestamp: new Date().toISOString(),
     };
 
-    this.handleNewTranscripts([testSegment]);
+    this.handleNewTranscriptsLive([testSegment]);
     console.log('🧪 Simulated webhook transcription:', text);
   }
 
@@ -616,6 +736,72 @@ class WebhookService extends EventEmitter {
   // Test method to simulate recording end
   public simulateRecordingEnd() {
     this.handleRecordingEnd('manual_stop');
+  }
+
+  // FORCE IMMEDIATE FINALIZATION: Bypasses timeout and forces finalization with current data
+  public async forceImmediateFinalization() {
+    console.log('🚨 FORCE FINALIZE: Bypassing timeout and finalizing current transcripts...');
+    
+    if (this.accumulatedTranscripts.length > 0) {
+      console.log(`🚨 FORCE FINALIZE: Found ${this.accumulatedTranscripts.length} accumulated transcripts, finalizing now...`);
+      await this.finalizeAccumulatedTranscription();
+    } else {
+      console.log('🚨 FORCE FINALIZE: No accumulated transcripts, creating test data...');
+      // Add test data and finalize
+      const testSegment = {
+        id: `force-finalize-${Date.now()}`,
+        speaker: 'FORCE_TEST',
+        text: 'Force finalization test - bypassing timeout completely',
+        start: 0,
+        end: 2,
+        confidence: 0.98,
+        source: 'FORCE_FINALIZE_TEST',
+        timestamp: new Date().toISOString(),
+      };
+      this.accumulatedTranscripts.push(testSegment);
+      this.currentSessionId = `force-session-${Date.now()}`;
+      await this.finalizeAccumulatedTranscription();
+    }
+  }
+
+  // EMERGENCY TEST METHOD: Force backend storage immediately with current accumulated data
+  public async testBackendStorageNow() {
+    console.log('🧪 EMERGENCY TEST: Forcing backend storage with current data...');
+    
+    if (this.accumulatedTranscripts.length === 0) {
+      // Create test data if no accumulated data
+      const testSegment = {
+        id: `test-emergency-${Date.now()}`,
+        speaker: 'TEST_STORAGE',
+        text: 'Testing emergency backend storage functionality',
+        start: 0,
+        end: 3,
+        confidence: 0.95,
+        source: 'EMERGENCY_TEST',
+        timestamp: new Date().toISOString(),
+        receivedAt: new Date()
+      };
+      this.accumulatedTranscripts.push(testSegment);
+      console.log('🧪 Created test segment for emergency test');
+    }
+
+    console.log(`🧪 Testing with ${this.accumulatedTranscripts.length} accumulated segments`);
+    
+    // Force create conversation and store
+    const testConversation: Conversation = {
+      id: `emergency-test-${Date.now()}`,
+      startTime: new Date(Date.now() - 60000), // 1 minute ago
+      endTime: new Date(),
+      transcripts: [...this.accumulatedTranscripts],
+      status: 'completed'
+    };
+
+    try {
+      await this.storeConversationToBackend(testConversation);
+      console.log('🧪 EMERGENCY TEST: Storage call completed - check logs above for success/failure');
+    } catch (error) {
+      console.error('🧪 EMERGENCY TEST FAILED:', error);
+    }
   }
 }
 

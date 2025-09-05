@@ -82,7 +82,7 @@ router.post('/store', async (req: Request, res: Response) => {
       console.warn('⚠️ AI title/summary generation failed, using defaults:', (error as Error).message);
     }
 
-    // Store in ZeroEntropy using REST API (same pattern as regular transcribe)
+    // Store in ZeroEntropy using REST API (same as audio transcribe - works on Vercel)
     const collection_name = 'ai-wearable-transcripts';
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const cleanRecordingId = (recordingId || 'rec').replace(/[^a-zA-Z0-9-]/g, '');
@@ -122,11 +122,9 @@ router.post('/store', async (req: Request, res: Response) => {
       console.error(`❌ ZeroEntropy save failed: ${zeResponse.status} ${zeResponse.statusText} - ${errorText}`);
     } else {
       zeData = await zeResponse.json();
-      zeroEntropyDocId = (zeData as any)?.document?.id || null;
       zeroEntropySuccess = true;
       console.log('✅ ZeroEntropy save successful:', zeResponse.status);
       console.log('ZeroEntropy response data:', JSON.stringify(zeData, null, 2));
-      console.log(`🔍 Stored in ZeroEntropy with document ID: ${zeroEntropyDocId}`);
       console.log('Document path saved:', zePath);
     }
 

@@ -158,9 +158,9 @@ export default function RecordScreen({ route }: any) {
 
     // Setup webhook event listeners
     WebhookService.on('recordingStarted', handleWebhookRecordingStarted);
-    WebhookService.on('transcriptionUpdate', handleWebhookTranscriptionUpdate);
+    WebhookService.on('liveTranscript', handleWebhookLiveTranscript);
     WebhookService.on('recordingEnded', handleWebhookRecordingEnded);
-    WebhookService.on('conversationSummarized', handleConversationSummarized);
+    WebhookService.on('conversationCompleted', handleConversationCompleted);
     WebhookService.on('monitoringStarted', () => setIsWebhookMonitoring(true));
     WebhookService.on('monitoringStopped', () => setIsWebhookMonitoring(false));
 
@@ -431,14 +431,16 @@ export default function RecordScreen({ route }: any) {
     setTimeout(() => clearInterval(timer), 300000); // Auto-clear after 5 minutes
   };
 
-  const handleWebhookTranscriptionUpdate = (data: any) => {
-    console.log('📝 Hardware transcription update:', data.segments.length, 'segments');
+  const handleWebhookLiveTranscript = (data: any) => {
+    console.log('📝 Live transcription update:', data.segments.length, 'new segments,', data.totalSegments, 'total');
     // Add timestamp to each segment for display
     const segmentsWithTimestamp = data.segments.map((segment: any) => ({
       ...segment,
       receivedAt: new Date(),
-      conversationId: data.conversationId || 'webhook-live'
+      conversationId: data.sessionId || 'webhook-live'
     }));
+    
+    // Accumulate all segments (this will show all transcripts so far, not just new ones)
     setRealtimeTranscripts(prev => [...prev, ...segmentsWithTimestamp]);
   };
 
@@ -472,8 +474,8 @@ export default function RecordScreen({ route }: any) {
     }
   };
 
-  const handleConversationSummarized = async (data: any) => {
-    console.log('📋 Conversation summarized:', data.conversationId);
+  const handleConversationCompleted = async (data: any) => {
+    console.log('📋 Conversation completed:', data.conversation.id);
     
     // Create a transcript from the conversation
     const conversation = data.conversation;
@@ -508,7 +510,7 @@ export default function RecordScreen({ route }: any) {
           timestamp: t.timestamp || new Date().toISOString()
         }));
 
-        const response = await fetch('https://backend-r466156gz-amy-zhous-projects-45e75853.vercel.app/api/webhook-transcription/store', {
+        const response = await fetch('https://backend-henna-tau-11.vercel.app/api/webhook-transcription/store', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1305,7 +1307,7 @@ export default function RecordScreen({ route }: any) {
                 style={styles.realtimeHeader} 
                 onPress={() => setIsTranscriptionCollapsed(!isTranscriptionCollapsed)}
               >
-                <Ionicons name="radio" size={16} color={isHardwareRecording ? colors.accent.main : colors.primary.main} />
+                <Ionicons name="radio" size={16} color={isHardwareRecording ? colors.text.accent : colors.primary.main} />
                 <Text style={styles.realtimeSectionTitle}>
                   {isHardwareRecording ? '🔴 Recording' : '👂 Listening'} for Transcripts
                 </Text>
@@ -1931,7 +1933,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   transcriptConfidence: {
     fontSize: 10,
-    color: colors.accent.main,
+    color: colors.text.accent,
     fontWeight: '500',
   },
   transcriptText: {
