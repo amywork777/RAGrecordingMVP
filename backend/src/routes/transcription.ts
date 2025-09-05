@@ -198,6 +198,9 @@ router.post('/transcribe/text', async (req: Request, res: Response) => {
         }
       });
       
+      // Hard limit on number of speakers to prevent excessive indexing
+      const MAX_SPEAKERS = 8;
+      
       // Create the main speakerMap for both speaker_id based and speaker field based mapping
       transcriptSegments.forEach((segment: any) => {
         if (segment.speaker_id !== undefined) {
@@ -205,9 +208,41 @@ router.post('/transcribe/text', async (req: Request, res: Response) => {
           const consolidatedName = speakerIdMapping.get(segment.speaker_id)!;
           speakerMap.set(segment.speaker, consolidatedName); // Map the speaker field to consolidated name
         } else if (segment.speaker && !speakerMap.has(segment.speaker)) {
-          // Fallback for segments without speaker_id
-          speakerMap.set(segment.speaker, `Speaker ${nextSpeakerId}`);
-          nextSpeakerId++;
+          // Check if we've reached the speaker limit
+          const uniqueSpeakersCount = new Set(Array.from(speakerMap.values())).size;
+          if (uniqueSpeakersCount >= MAX_SPEAKERS) {
+            // Assign to last speaker instead of creating new one
+            speakerMap.set(segment.speaker, `Speaker ${MAX_SPEAKERS}`);
+            return;
+          }
+          
+          // Normalize speaker name to catch variations - preserve numbers but normalize format  
+          const normalizedSpeaker = segment.speaker.toUpperCase()
+            .replace(/[_\s]+/g, '')  // Remove underscores and spaces
+            .replace(/^SPEAKER0*/, 'SPEAKER')  // Convert SPEAKER00, SPEAKER01 -> SPEAKER, SPEAKER1
+            .replace(/^SPEAKER(\d+)$/, 'SPEAKER$1');  // Keep final format as SPEAKER1, SPEAKER2
+          
+          const existingSpeaker = Array.from(speakerMap.keys()).find(existing => {
+            const existingNormalized = existing.toUpperCase()
+              .replace(/[_\s]+/g, '')
+              .replace(/^SPEAKER0*/, 'SPEAKER') 
+              .replace(/^SPEAKER(\d+)$/, 'SPEAKER$1');
+            return existingNormalized === normalizedSpeaker;
+          });
+          
+          if (existingSpeaker) {
+            // Reuse existing speaker mapping for variations
+            speakerMap.set(segment.speaker, speakerMap.get(existingSpeaker)!);
+          } else {
+            // Create new speaker only if under limit
+            if (nextSpeakerId <= MAX_SPEAKERS) {
+              speakerMap.set(segment.speaker, `Speaker ${nextSpeakerId}`);
+              nextSpeakerId++;
+            } else {
+              // Over limit, assign to last speaker
+              speakerMap.set(segment.speaker, `Speaker ${MAX_SPEAKERS}`);
+            }
+          }
         }
       });
 

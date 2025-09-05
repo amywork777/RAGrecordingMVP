@@ -328,9 +328,23 @@ export default function RecordScreen({ route }: any) {
         const mergedTranscripts = [...localOnlyTranscripts, ...backendTranscripts]
           .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
         
-        console.log(`Merging transcripts: ${localOnlyTranscripts.length} local-only + ${backendTranscripts.length} backend = ${mergedTranscripts.length} total`);
-        setTranscripts(mergedTranscripts);
-        setFilteredTranscripts(mergedTranscripts);
+        // Final deduplication by ID to prevent React key conflicts
+        const deduplicatedTranscripts = mergedTranscripts.reduce((acc, current) => {
+          const existingIndex = acc.findIndex(t => t.id === current.id);
+          if (existingIndex === -1) {
+            acc.push(current);
+          } else {
+            // Keep the one with more complete data (prefer backend data with titles/summaries)
+            if (current.title && current.summary && !acc[existingIndex].title) {
+              acc[existingIndex] = current;
+            }
+          }
+          return acc;
+        }, [] as Transcript[]);
+        
+        console.log(`Merging transcripts: ${localOnlyTranscripts.length} local-only + ${backendTranscripts.length} backend = ${mergedTranscripts.length} merged -> ${deduplicatedTranscripts.length} deduplicated`);
+        setTranscripts(deduplicatedTranscripts);
+        setFilteredTranscripts(deduplicatedTranscripts);
         console.log('Transcripts updated with merged data');
       }
     } catch (error) {
@@ -433,6 +447,7 @@ export default function RecordScreen({ route }: any) {
 
   const handleWebhookLiveTranscript = (data: any) => {
     console.log('📝 Live transcription update:', data.segments.length, 'new segments,', data.totalSegments, 'total');
+    
     // Add timestamp to each segment for display
     const segmentsWithTimestamp = data.segments.map((segment: any) => ({
       ...segment,
@@ -440,8 +455,24 @@ export default function RecordScreen({ route }: any) {
       conversationId: data.sessionId || 'webhook-live'
     }));
     
-    // Accumulate all segments (this will show all transcripts so far, not just new ones)
-    setRealtimeTranscripts(prev => [...prev, ...segmentsWithTimestamp]);
+    // Only add new segments that aren't already in the list to prevent duplicates
+    setRealtimeTranscripts(prev => {
+      const newSegments = segmentsWithTimestamp.filter(newSeg => 
+        !prev.some(existingSeg => 
+          existingSeg.text === newSeg.text && 
+          existingSeg.speaker === newSeg.speaker &&
+          Math.abs((existingSeg.receivedAt?.getTime() || 0) - (newSeg.receivedAt?.getTime() || 0)) < 5000 // Within 5 seconds
+        )
+      );
+      
+      if (newSegments.length > 0) {
+        console.log(`Adding ${newSegments.length} new segments (${prev.length} existing)`);
+        // Keep only the last 50 segments to prevent memory bloat
+        return [...prev, ...newSegments].slice(-50);
+      }
+      
+      return prev;
+    });
   };
 
   const handleWebhookRecordingEnded = (data: any) => {
@@ -1207,7 +1238,7 @@ export default function RecordScreen({ route }: any) {
               >
                 <Ionicons name="radio" size={16} color={isHardwareRecording ? colors.text.accent : colors.primary.main} />
                 <Text style={styles.realtimeSectionTitle}>
-                  {isHardwareRecording ? '🔴 Recording' : '👂 Listening'} for Transcripts
+                  {isHardwareRecording ? 'Recording' : 'Listening'} 
                 </Text>
                 <View style={styles.statusIndicator}>
                   <ActivityIndicator size="small" color={colors.primary.main} />
@@ -1224,24 +1255,28 @@ export default function RecordScreen({ route }: any) {
               {!isTranscriptionCollapsed && (
                 realtimeTranscripts.length > 0 ? (
                   <ScrollView style={styles.transcriptContainer} nestedScrollEnabled>
-                    {realtimeTranscripts.slice(-10).map((segment, index) => (
-                      <View key={`${segment.id || index}-${segment.receivedAt?.getTime()}`} style={styles.transcriptSegment}>
-                        <View style={styles.transcriptHeader}>
-                          <Text style={styles.transcriptTime}>
-                            {segment.receivedAt ? segment.receivedAt.toLocaleTimeString() : 'Now'}
-                          </Text>
-                          {segment.speaker && (
-                            <Text style={styles.transcriptSpeaker}>{segment.speaker}</Text>
-                          )}
-                          {segment.confidence && (
-                            <Text style={styles.transcriptConfidence}>
-                              {Math.round(segment.confidence * 100)}%
+                    {realtimeTranscripts.slice(-10).map((segment, index) => {
+                      // Create a unique key using multiple properties to prevent duplicates
+                      const uniqueKey = `${segment.conversationId || 'webhook'}-${index}-${segment.receivedAt?.getTime() || Date.now()}-${segment.text?.slice(0, 20).replace(/\s/g, '')}`;
+                      return (
+                        <View key={uniqueKey} style={styles.transcriptSegment}>
+                          <View style={styles.transcriptHeader}>
+                            <Text style={styles.transcriptTime}>
+                              {segment.receivedAt ? segment.receivedAt.toLocaleTimeString() : 'Now'}
                             </Text>
-                          )}
+                            {segment.speaker && (
+                              <Text style={styles.transcriptSpeaker}>{segment.speaker}</Text>
+                            )}
+                            {segment.confidence && (
+                              <Text style={styles.transcriptConfidence}>
+                                {Math.round(segment.confidence * 100)}%
+                              </Text>
+                            )}
+                          </View>
+                          <Text style={styles.transcriptText}>{segment.text}</Text>
                         </View>
-                        <Text style={styles.transcriptText}>{segment.text}</Text>
-                      </View>
-                    ))}
+                      );
+                    })}
                     {realtimeTranscripts.length > 10 && (
                       <Text style={styles.realtimeMore}>
                         +{realtimeTranscripts.length - 10} earlier transcripts...

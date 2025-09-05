@@ -277,14 +277,18 @@ class WebhookService extends EventEmitter {
         return;
       }
 
-      console.log(`📦 Received ${requests.length} transcription requests from webhook`);
+      // Filter out already processed requests first
+      const newRequests = requests.filter(req => !this.processedRequestIds.has(req.uuid));
+      
+      if (newRequests.length === 0) {
+        console.log('📝 All transcription requests already processed');
+        return;
+      }
+      
+      console.log(`📦 Received ${newRequests.length} NEW transcription requests (${requests.length} total)`);
       const newSegments: TranscriptSegment[] = [];
 
-      for (const request of requests) {
-        // Skip if we've already processed this request
-        if (this.processedRequestIds.has(request.uuid)) {
-          continue;
-        }
+      for (const request of newRequests) {
 
         try {
           const content = request.content;
@@ -335,7 +339,9 @@ class WebhookService extends EventEmitter {
           segments.forEach((segment: TranscriptSegment) => {
             console.log(`💬 Found transcription: "${segment.text}" (${segment.speaker})`);
             
-            const segmentKey = `${segment.speaker}-${segment.text}-${segment.start}`;
+            // Create a more robust segment key including request UUID and text hash
+            const textHash = segment.text.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 50);
+            const segmentKey = `${request.uuid}-${segment.speaker}-${textHash}-${segment.start}`;
             
             if (!this.processedSegmentIds.has(segmentKey)) {
               console.log(`✅ Adding new transcript segment: "${segment.text}" (confidence: ${segment.confidence || 'N/A'})`);
