@@ -1154,113 +1154,78 @@ export default function RecordScreen({ route }: any) {
         </View>
 
         <View style={styles.recordContainer}>
-          <TouchableOpacity
-            style={styles.recordButtonWrapper}
-            onPress={toggleRecording}
-            disabled={isLoading}
-          >
-            <Animated.View
-              style={[
-                styles.pulseCircle,
-                {
-                  transform: [{ scale: pulseAnim }],
-                  opacity: isRecording ? 0.3 : 0,
-                },
-              ]}
-            />
-            <LinearGradient
-              colors={
-                isRecording 
-                  ? [colors.accent.error, '#DC2626']
-                  : [colors.primary.main, colors.secondary.main]
-              }
-              style={styles.recordButton}
+          {/* Main Recording Section - Horizontal Layout */}
+          <View style={styles.recordingRow}>
+            {/* Device Sync Button - Small Circular */}
+            <TouchableOpacity
+              style={styles.miniCircularButton}
+              onPress={autoSyncFromDevice}
+              disabled={isScanning || isSyncing}
             >
-              {isLoading ? (
-                <ActivityIndicator color="#fff" size="large" />
-              ) : (
-                <Ionicons 
-                  name={isRecording ? 'stop' : 'mic'} 
-                  size={24} 
-                  color="#fff" 
-                />
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
+              <LinearGradient
+                colors={[colors.primary.main, colors.primary.dark]}
+                style={styles.miniButtonGradient}
+              >
+                {isScanning || isSyncing ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Ionicons name="bluetooth" size={12} color="#fff" />
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+
+            {/* Main Record Button */}
+            <TouchableOpacity
+              style={styles.recordButtonWrapper}
+              onPress={toggleRecording}
+              disabled={isLoading}
+            >
+              <Animated.View
+                style={[
+                  styles.pulseCircle,
+                  {
+                    transform: [{ scale: pulseAnim }],
+                    opacity: isRecording ? 0.3 : 0,
+                  },
+                ]}
+              />
+              <LinearGradient
+                colors={
+                  isRecording 
+                    ? [colors.accent.error, '#DC2626']
+                    : [colors.primary.main, colors.secondary.main]
+                }
+                style={styles.recordButton}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color="#fff" size="large" />
+                ) : (
+                  <Ionicons 
+                    name={isRecording ? 'stop' : 'mic'} 
+                    size={24} 
+                    color="#fff" 
+                  />
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+
+            {/* Upload Button - Small Circular */}
+            <TouchableOpacity
+              style={styles.miniCircularButton}
+              onPress={() => setShowUploadOptions(!showUploadOptions)}
+            >
+              <LinearGradient
+                colors={[colors.primary.light, colors.primary.main]}
+                style={styles.miniButtonGradient}
+              >
+                <Ionicons name="cloud-upload" size={12} color="#fff" />
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
           
           <Text style={styles.recordHint}>
             {isRecording ? 'Tap to stop' : 'Tap to record'}
           </Text>
-
-          {/* Action Buttons Row */}
-          <View style={styles.actionButtonsContainer}>
-            {/* Bluetooth Section */}
-            <View style={styles.actionSection}>
-              <View style={styles.sectionHeader}>
-                <Ionicons name="bluetooth" size={14} color={colors.primary.main} />
-                <Text style={styles.deviceUploadTitle}>Device</Text>
-                {/* Auto-scan always enabled - no toggle needed */}
-                <Text style={styles.statusText}>Auto-scan enabled</Text>
-              </View>
-              
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={autoSyncFromDevice}
-                disabled={isScanning || isSyncing}
-              >
-                <LinearGradient
-                  colors={[colors.primary.main, colors.primary.dark]}
-                  style={styles.actionButtonGradient}
-                >
-                  {isScanning || isSyncing ? (
-                    <>
-                      <ActivityIndicator color="#fff" size="small" />
-                      <Text style={styles.actionButtonText}>
-                        {isScanning ? 'Scanning' : `${syncProgress.toFixed(0)}%`}
-                      </Text>
-                    </>
-                  ) : (
-                    <>
-                      <Ionicons name="sync" size={12} color="#fff" />
-                      <Text style={styles.actionButtonText}>Sync</Text>
-                    </>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-
-              {autoScanEnabled && (
-                <Text style={styles.statusText}>
-                  {isAutoScanning ? 'Auto-scanning...' : 'Auto enabled'}
-                </Text>
-              )}
-            </View>
-
-            {/* Upload Section */}
-            <View style={styles.actionSection}>
-              <View style={styles.sectionHeader}>
-                <Ionicons name="cloud-upload" size={14} color={colors.primary.main} />
-                <Text style={styles.deviceUploadTitle}>Upload</Text>
-              </View>
-              
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => setShowUploadOptions(!showUploadOptions)}
-              >
-                <LinearGradient
-                  colors={[colors.primary.light, colors.primary.main]}
-                  style={styles.actionButtonGradient}
-                >
-                  <Text style={styles.actionButtonText}>File Type</Text>
-                  <Ionicons 
-                    name={showUploadOptions ? "chevron-up" : "chevron-down"} 
-                    size={10} 
-                    color="#fff" 
-                  />
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-
-          </View>
         </View>
 
         <View style={styles.transcriptsSection}>
@@ -1642,6 +1607,13 @@ const createStyles = (colors: any) => StyleSheet.create({
     alignItems: 'center',
     paddingVertical: spacing.sm,
   },
+  recordingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
   recordButtonWrapper: {
     position: 'relative',
     alignItems: 'center',
@@ -1739,9 +1711,9 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   screenDropdownContainer: {
     position: 'absolute',
-    top: 320, // Positioned right below the File Type button
-    left: '52%', // Positioned under the right side (upload section)  
-    width: 100, // Same width as the File Type button
+    top: 220, // Positioned below the mini circular upload button
+    right: 80, // Aligned with the upload button position
+    width: 100,
     backgroundColor: colors.background.primary,
     borderRadius: borderRadius.sm,
     borderWidth: 1,
@@ -2209,6 +2181,21 @@ const createStyles = (colors: any) => StyleSheet.create({
     padding: spacing.xs,
     borderRadius: borderRadius.sm,
     backgroundColor: `${colors.text.secondary}10`,
+  },
+
+  // Mini Circular Button Styles
+  miniCircularButton: {
+    borderRadius: 16, // Perfect circle for 32x32
+    overflow: 'hidden',
+    ...shadows.button,
+    width: 32,
+    height: 32,
+  },
+  miniButtonGradient: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
   },
 
 }); // End of createStyles function
