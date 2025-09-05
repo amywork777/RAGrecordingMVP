@@ -82,42 +82,52 @@ router.post('/store', async (req: Request, res: Response) => {
       console.warn('⚠️ AI title/summary generation failed, using defaults:', (error as Error).message);
     }
 
-    // Store in ZeroEntropy (following existing pattern)
+    // Store in ZeroEntropy using REST API (same pattern as regular transcribe)
     const collection_name = 'ai-wearable-transcripts';
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const cleanRecordingId = (recordingId || 'rec').replace(/[^a-zA-Z0-9-]/g, '');
     const zePath = `hardware-recordings/${timestamp}_${cleanRecordingId}.txt`;
     
+    let zeData = null;
     let zeroEntropyDocId = null;
-    try {
-      const client = getZeroEntropyClient();
-      
-      const zeroEntropyDoc = await client.documents.add({
+    let zeroEntropySuccess = false;
+    
+    const zeResponse = await fetch(`https://api.zeroentropy.dev/v1/documents/add-document`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.ZEROENTROPY_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
         collection_name,
         path: zePath,
-        content: {
-          type: 'text',
-          text: fullTranscript,
-        },
+        content: { type: 'text', text: fullTranscript },
         metadata: {
-          recordingId,
-          title,
-          summary,
           timestamp: new Date().toISOString(),
+          recordingId,
           source: 'hardware-webhook',
+          topic: title,
+          aiTitle: title,
+          aiSummary: summary,
           type: 'hardware-transcription',
           segmentCount: transcriptSegments.length.toString(),
           speakers: [...new Set(transcriptSegments.map(s => s.speaker).filter(Boolean))].join(', '),
           ...metadata
         },
-      });
+      }),
+    });
 
-      zeroEntropyDocId = (zeroEntropyDoc as any).document_id;
+    if (!zeResponse.ok) {
+      const errorText = await zeResponse.text();
+      console.error(`❌ ZeroEntropy save failed: ${zeResponse.status} ${zeResponse.statusText} - ${errorText}`);
+    } else {
+      zeData = await zeResponse.json();
+      zeroEntropyDocId = (zeData as any)?.document?.id || null;
+      zeroEntropySuccess = true;
+      console.log('✅ ZeroEntropy save successful:', zeResponse.status);
+      console.log('ZeroEntropy response data:', JSON.stringify(zeData, null, 2));
       console.log(`🔍 Stored in ZeroEntropy with document ID: ${zeroEntropyDocId}`);
-
-    } catch (error) {
-      console.error('❌ ZeroEntropy storage failed:', (error as Error).message);
-      // Continue without failing the entire request
+      console.log('Document path saved:', zePath);
     }
 
     // Store in Supabase following the existing pattern
