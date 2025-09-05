@@ -267,10 +267,25 @@ export default function ChatScreen({ navigation }: any) {
               <TouchableOpacity 
                 style={styles.sourceChip}
                 onPress={() => {
-                  if (message.sources && message.sources[0]?.id) {
-                    navigation.navigate('Record', { 
-                      transcriptId: message.sources[0].id 
-                    });
+                  console.log('=== SOURCE CLICKED ===');
+                  console.log('Source:', message.sources?.[0]);
+                  
+                  if (message.sources && message.sources[0]) {
+                    const source = message.sources[0];
+                    const transcriptionData = {
+                      id: source.id || 'source-' + Date.now(),
+                      text: source.text,
+                      timestamp: source.timestamp || new Date().toISOString(),
+                      recordingId: source.id || 'unknown',
+                      aiTitle: source.topic || 'Source Document',
+                      aiSummary: source.text.length > 200 ? source.text.substring(0, 200) + '...' : source.text,
+                      topic: source.topic || 'Source Document',
+                      title: source.topic || 'Source Document',
+                      summary: source.text.length > 200 ? source.text.substring(0, 200) + '...' : source.text,
+                    };
+                    
+                    console.log('Navigating to TranscriptionDetail with source data:', transcriptionData);
+                    navigation.navigate('TranscriptionDetail', { transcription: transcriptionData });
                   }
                 }}
               >
@@ -279,7 +294,7 @@ export default function ChatScreen({ navigation }: any) {
                   size={10} 
                   color={colors.primary.main} 
                 />
-                <Text style={styles.sourceText} numberOfLines={1}>
+                <Text style={styles.sourceText} numberOfLines={2}>
                   "{message.sources[0].text}"
                 </Text>
               </TouchableOpacity>
@@ -295,17 +310,19 @@ export default function ChatScreen({ navigation }: any) {
                   onPress={() => {
                     console.log('=== RESULT CLICKED ===');
                     console.log('Result ID:', result.id);
-                    console.log('Result text preview:', result.text.substring(0, 100));
+                    console.log('Result:', JSON.stringify(result, null, 2));
                     
                     const transcriptionData = {
                       id: result.id,
                       text: result.text,
                       timestamp: result.timestamp,
                       recordingId: result.recordingId,
-                      // Use actual data from the result if available
-                      aiTitle: (result as any).aiTitle || (result as any).title || `Transcription ${result.recordingId}`,
-                      aiSummary: (result as any).aiSummary || (result as any).summary || '',
-                      topic: (result as any).topic || '',
+                      // Use enhanced result data from backend
+                      aiTitle: (result as any).aiTitle || (result as any).title || 'Search Result',
+                      aiSummary: (result as any).aiSummary || (result as any).summary || result.text.substring(0, 200) + '...',
+                      topic: (result as any).topic || (result as any).aiTitle || 'Search Result',
+                      title: (result as any).title || (result as any).aiTitle || 'Search Result',
+                      summary: (result as any).summary || (result as any).aiSummary || result.text.substring(0, 200) + '...',
                     };
                     
                     console.log('Navigating to TranscriptionDetail with data:', transcriptionData);
@@ -521,19 +538,21 @@ const createStyles = (colors: any) => StyleSheet.create({
   sourceChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: `${colors.primary.main}08`,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: borderRadius.sm,
+    backgroundColor: `${colors.primary.main}15`,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: borderRadius.md,
     borderWidth: 1,
-    borderColor: `${colors.primary.main}20`,
+    borderColor: `${colors.primary.main}30`,
+    marginTop: spacing.xs,
   },
   sourceText: {
     ...typography.caption,
-    color: colors.text.secondary,
-    marginLeft: 4,
-    fontSize: 10,
-    fontStyle: 'italic',
+    color: colors.primary.main,
+    marginLeft: 6,
+    marginRight: 4,
+    fontSize: 11,
+    fontWeight: '500',
   },
   resultsContainer: {
     marginTop: spacing.sm,

@@ -25,13 +25,26 @@ router.post('/search', async (req: Request, res: Response) => {
       answer = "I couldn't find any relevant information in your recordings for that query.";
     }
 
-    const formattedResults = searchResults.map(result => ({
-      id: result.id,
-      text: result.text,
-      timestamp: result.metadata?.timestamp || new Date().toISOString(),
-      recordingId: result.metadata?.recordingId || 'unknown',
-      score: result.score,
-    }));
+    const formattedResults = searchResults.map((result, index) => {
+      // Generate unique ID from path or create one
+      const uniqueId = result.id || result.path || `search-result-${Date.now()}-${index}`;
+      
+      return {
+        id: uniqueId,
+        text: result.text,
+        timestamp: result.metadata?.timestamp || new Date().toISOString(),
+        recordingId: result.metadata?.recordingId || uniqueId,
+        score: result.score,
+        // Include additional fields for proper navigation
+        aiTitle: result.metadata?.aiTitle || result.metadata?.topic || result.title || 'Search Result',
+        aiSummary: result.metadata?.aiSummary || result.summary || (result.text.length > 200 ? result.text.substring(0, 200) + '...' : result.text),
+        title: result.metadata?.title || result.metadata?.aiTitle || result.title || 'Search Result',
+        summary: result.metadata?.summary || result.metadata?.aiSummary || result.summary || '',
+        topic: result.metadata?.topic || result.metadata?.aiTitle || result.title || '',
+        // Include the path for debugging
+        path: result.path,
+      };
+    });
 
     res.json({
       results: formattedResults,
