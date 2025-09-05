@@ -170,6 +170,185 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
   }
 });
 
+// POST /api/transcribe/text - Store already transcribed text (webhook transcriptions)
+router.post('/transcribe/text', async (req: Request, res: Response) => {
+  try {
+    const { 
+      recordingId: providedRecordingId,
+      sessionId,
+      transcriptSegments,
+      fullTranscript,
+      metadata = {}
+    } = req.body;
+
+    // Accept either pre-combined fullTranscript or segments to combine
+    let transcriptionText = fullTranscript;
+    
+    if (!transcriptionText && transcriptSegments && Array.isArray(transcriptSegments)) {
+      // Combine segments like webhookTranscription does
+      transcriptionText = transcriptSegments
+        .map((segment: any) => {
+          const speaker = segment.speaker ? `${segment.speaker}: ` : '';
+          const timing = segment.start && segment.end ? ` [${segment.start.toFixed(1)}s - ${segment.end.toFixed(1)}s]` : '';
+          return `${speaker}${segment.text}${timing}`;
+        })
+        .join('\n');
+    }
+
+    if (!transcriptionText || transcriptionText.trim().length === 0) {
+      return res.status(400).json({ error: 'No transcription text provided' });
+    }
+
+    const recordingId = providedRecordingId || sessionId || `live-${Date.now()}`;
+    console.log(`📝 Storing text transcription for recording: ${recordingId}`);
+    console.log(`📄 Transcription length: ${transcriptionText.length} characters`);
+
+    // Generate AI title and summary using ClaudeService (like other routes)
+    let title = 'Live Recording';
+    let summary = 'Hardware-generated transcription';
+
+    try {
+      console.log('🤖 Generating AI title and summary...');
+      const ClaudeService = (await import('../services/ClaudeService')).default;
+      const aiResult = await ClaudeService.generateTitleAndSummary(transcriptionText);
+      title = aiResult.title || title;
+      summary = aiResult.summary || summary;
+      console.log(`✅ AI Generated - Title: "${title}", Summary length: ${summary.length} chars`);
+    } catch (error) {
+      console.warn('⚠️ AI title/summary generation failed, using defaults:', (error as Error).message);
+    }
+
+    // Store in ZeroEntropy using SDK first, fallback to REST API
+    const collection_name = 'ai-wearable-transcripts';
+    const zePath = `mobile/recordings/${Date.now()}_${(recordingId || 'rec')}_live.txt`;
+    
+    let zeData = null;
+    let zeroEntropySuccess = false;
+    
+    // Try SDK first (like batch endpoint)
+    try {
+      console.log('Attempting ZeroEntropy save via SDK...');
+      const client = getZeroEntropyClient();
+      zeData = await client.documents.add({
+        collection_name,
+        path: zePath,
+        content: { type: 'text', text: transcriptionText },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          recordingId: recordingId,
+          source: 'live-transcription',
+          topic: title,
+          aiTitle: title,
+          aiSummary: summary,
+          type: 'live-transcription',
+          ...metadata
+        } as any,
+      } as any);
+      
+      zeroEntropySuccess = true;
+      console.log('✅ ZeroEntropy save successful via SDK');
+      console.log('Document path saved:', zePath);
+    } catch (sdkError) {
+      console.warn('❌ ZeroEntropy SDK failed, trying REST API fallback:', (sdkError as Error).message);
+      
+      // Fallback to REST API (like regular transcribe endpoint)
+      try {
+        const zeResponse = await fetch(`https://api.zeroentropy.dev/v1/documents/add-document`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.ZEROENTROPY_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            collection_name,
+            path: zePath,
+            content: { type: 'text', text: transcriptionText },
+            metadata: {
+              timestamp: new Date().toISOString(),
+              recordingId: recordingId,
+              source: 'live-transcription',
+              topic: title,
+              aiTitle: title,
+              aiSummary: summary,
+              type: 'live-transcription',
+              ...metadata
+            },
+          }),
+        });
+
+        if (zeResponse.ok) {
+          zeData = await zeResponse.json();
+          zeroEntropySuccess = true;
+          console.log('✅ ZeroEntropy save successful via REST API fallback');
+          console.log('Document path saved:', zePath);
+        } else {
+          const errorText = await zeResponse.text();
+          console.error(`❌ ZeroEntropy REST API also failed: ${zeResponse.status} - ${errorText}`);
+        }
+      } catch (restError) {
+        console.error('❌ ZeroEntropy REST API fallback failed:', (restError as Error).message);
+      }
+    }
+
+    // Fire-and-forget: upsert into Supabase (same pattern as regular transcribe)
+    (async () => {
+      try {
+        if (SupabaseService.isConfigured()) {
+          const docId = await SupabaseService.upsertDocument({
+            ze_collection_name: collection_name,
+            ze_path: zePath,
+            ze_document_id: (zeData as any)?.document?.id || null,
+            recording_id: recordingId,
+            timestamp: new Date().toISOString(),
+            topic: title,
+            mime_type: 'text/plain',
+            original_name: `live-recording-${recordingId}.txt`,
+            size_bytes: transcriptionText.length,
+            source: 'live-transcription',
+            ze_index_status: (zeData as any)?.document?.index_status || null,
+            device_name: metadata.deviceId || 'unknown-device',
+            duration_seconds: transcriptSegments ? Math.max(...transcriptSegments.map((s: any) => s.end || 0)) || undefined : undefined,
+          });
+          if (docId) {
+            await SupabaseService.setLatestAnnotation(docId, title, summary, 'claude');
+            console.log(`💾 Stored in Supabase with ID: ${docId}`);
+          }
+        }
+      } catch (e) {
+        console.warn('Supabase upsert (transcribe/text) failed:', e);
+      }
+    })();
+
+    res.json({
+      success: true,
+      transcription: transcriptionText,
+      title,
+      summary,
+      path: zePath,
+      collection_name,
+      recordingId,
+      timestamp: new Date().toISOString(),
+      zeroEntropyStatus: zeroEntropySuccess ? 'success' : 'failed',
+      supabaseId: null, // Will be set async
+      zeroEntropyDocId: (zeData as any)?.document?.id || null,
+      transcriptLength: transcriptionText.length,
+      message: 'Text transcription stored successfully'
+    });
+
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Text transcription error:', errorMessage);
+    res.status(500).json({ 
+      error: 'Failed to store text transcription',
+      details: errorMessage,
+      hasKeys: {
+        openai: !!process.env.OPENAI_API_KEY,
+        zeroentropy: !!process.env.ZEROENTROPY_API_KEY
+      }
+    });
+  }
+});
+
 router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request, res: Response) => {
   try {
     if (!req.files || !Array.isArray(req.files)) {

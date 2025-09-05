@@ -80,6 +80,9 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Network access: http://192.168.1.16:${PORT}/health`);
   console.log('\nAvailable endpoints:');
   console.log('POST /api/transcribe - Transcribe audio chunks');
+  console.log('POST /api/transcribe/text - Store text transcription');
+  console.log('POST /api/transcribe/batch - Transcribe multiple audio files');
+  console.log('POST /api/webhook-transcription/store - Store webhook transcription');
   console.log('POST /api/search - Search through transcripts');
   console.log('POST /api/chat/transcription - Chat with a specific transcription');
   console.log('GET /api/transcripts/recent - Get recent transcripts');
