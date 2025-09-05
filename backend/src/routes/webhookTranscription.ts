@@ -57,6 +57,7 @@ router.post('/store', async (req: Request, res: Response) => {
     
     console.log(`📝 Storing webhook transcription for recording: ${recordingId}`);
     console.log(`📊 Processing ${transcriptSegments.length} transcript segments`);
+    console.log(`🐛 DEBUG: First 3 segments:`, JSON.stringify(transcriptSegments.slice(0, 3), null, 2));
 
     // Create a speaker mapping using the speaker_id field when available
     const speakerMap = new Map<string, string>();

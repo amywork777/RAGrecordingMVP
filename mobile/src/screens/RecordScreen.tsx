@@ -1122,35 +1122,7 @@ export default function RecordScreen({ route }: any) {
       >
         <View style={styles.header}>
           <Text style={styles.title}>Welcome to Tai</Text>
-          <View style={styles.statusBadges}>
-            {isRecording && (
-              <View style={styles.recordingBadge}>
-                <View style={styles.recordingDot} />
-                <Text style={styles.recordingTime}>{formatTime(recordingTime)}</Text>
-                <Text style={styles.recordingLabel}>APP</Text>
-                {isBackgroundRecording && (
-                  <View style={styles.backgroundIndicator}>
-                    <Ionicons name="moon" size={12} color="#fff" />
-                    <Text style={styles.backgroundText}>BG</Text>
-                  </View>
-                )}
-              </View>
-            )}
-            {isHardwareRecording && (
-              <View style={styles.hardwareRecordingBadge}>
-                <View style={styles.recordingDot} />
-                <Text style={styles.recordingTime}>{formatTime(webhookRecordingDuration)}</Text>
-                <Text style={styles.recordingLabel}>HW</Text>
-                <Ionicons name="hardware-chip" size={12} color="#fff" />
-              </View>
-            )}
-            {isWebhookMonitoring && !isHardwareRecording && (
-              <View style={styles.monitoringBadge}>
-                <ActivityIndicator size="small" color="#fff" />
-                <Text style={styles.monitoringText}>LISTENING</Text>
-              </View>
-            )}
-          </View>
+         
         </View>
 
         <View style={styles.recordContainer}>
@@ -1227,46 +1199,7 @@ export default function RecordScreen({ route }: any) {
             {isRecording ? 'Tap to stop' : 'Tap to record'}
           </Text>
         </View>
-
-        <View style={styles.transcriptsSection}>
-          <View style={styles.transcriptsHeader}>
-            <Text style={styles.sectionTitle}>Recent Transcripts</Text>
-            <View style={styles.headerControls}>
-              <TouchableOpacity
-                style={styles.refreshButton}
-                onPress={loadTranscriptsFromBackend}
-              >
-                <Ionicons name="refresh" size={18} color={colors.primary.main} />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Search Bar */}
-          <View style={styles.searchContainer}>
-            <View style={styles.searchInputWrapper}>
-              <Ionicons name="search" size={18} color={colors.text.secondary} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search transcripts..."
-                placeholderTextColor={colors.text.disabled}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-              />
-              {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery('')}>
-                  <Ionicons name="close-circle" size={18} color={colors.text.secondary} />
-                </TouchableOpacity>
-              )}
-            </View>
-            {searchQuery && filteredTranscripts.length > 0 && (
-              <Text style={styles.searchResults}>
-                Found {filteredTranscripts.length} result{filteredTranscripts.length !== 1 ? 's' : ''}
-              </Text>
-            )}
-          </View>
-
-          {/* Webhook Transcription Monitor */}
-          {isWebhookMonitoring && (
+        {isWebhookMonitoring && (
             <View style={styles.realtimeSection}>
               <TouchableOpacity 
                 style={styles.realtimeHeader} 
@@ -1328,6 +1261,45 @@ export default function RecordScreen({ route }: any) {
               )}
             </View>
           )}
+        <View style={styles.transcriptsSection}>
+          <View style={styles.transcriptsHeader}>
+            <Text style={styles.sectionTitle}>Recent Transcripts</Text>
+            <View style={styles.headerControls}>
+              <TouchableOpacity
+                style={styles.refreshButton}
+                onPress={loadTranscriptsFromBackend}
+              >
+                <Ionicons name="refresh" size={18} color={colors.primary.main} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Search Bar */}
+          <View style={styles.searchContainer}>
+            <View style={styles.searchInputWrapper}>
+              <Ionicons name="search" size={18} color={colors.text.secondary} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search transcripts..."
+                placeholderTextColor={colors.text.disabled}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <Ionicons name="close-circle" size={18} color={colors.text.secondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+            {searchQuery && filteredTranscripts.length > 0 && (
+              <Text style={styles.searchResults}>
+                Found {filteredTranscripts.length} result{filteredTranscripts.length !== 1 ? 's' : ''}
+              </Text>
+            )}
+          </View>
+
+          {/* Webhook Transcription Monitor */}
+         
 
 
           <ScrollView 
@@ -1846,6 +1818,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     marginVertical: spacing.sm,
     borderWidth: 1,
     borderColor: `${colors.primary.main}20`,
+    marginHorizontal: spacing.lg,
   },
   realtimeHeader: {
     flexDirection: 'row',

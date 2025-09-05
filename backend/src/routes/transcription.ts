@@ -227,6 +227,9 @@ router.post('/transcribe/text', async (req: Request, res: Response) => {
 
     const recordingId = providedRecordingId || sessionId || `live-${Date.now()}`;
     console.log(`📝 Storing text transcription for recording: ${recordingId}`);
+    if (transcriptSegments && Array.isArray(transcriptSegments)) {
+      console.log(`🐛 DEBUG: transcribe/text - First 3 segments:`, JSON.stringify(transcriptSegments.slice(0, 3), null, 2));
+    }
     console.log(`📄 Transcription length: ${transcriptionText.length} characters`);
 
     // Generate AI title and summary using ClaudeService (like other routes)
