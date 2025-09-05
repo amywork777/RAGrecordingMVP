@@ -57,10 +57,24 @@ router.post('/store', async (req: Request, res: Response) => {
     console.log(`📝 Storing webhook transcription for recording: ${recordingId}`);
     console.log(`📊 Processing ${transcriptSegments.length} transcript segments`);
 
-    // Combine all segments into a single transcript text
+    // Create a speaker mapping to consolidate speaker IDs
+    const speakerMap = new Map<string, string>();
+    let speakerCounter = 1;
+
+    // Process segments to create consolidated speaker mapping
+    transcriptSegments.forEach(segment => {
+      if (segment.speaker && !speakerMap.has(segment.speaker)) {
+        speakerMap.set(segment.speaker, `Speaker ${speakerCounter}`);
+        speakerCounter++;
+      }
+    });
+
+    console.log(`🎤 Identified ${speakerMap.size} unique speakers:`, Array.from(speakerMap.values()).join(', '));
+
+    // Combine all segments into a single transcript text with consolidated speaker names
     const fullTranscript = transcriptSegments
       .map(segment => {
-        const speaker = segment.speaker ? `${segment.speaker}: ` : '';
+        const speaker = segment.speaker ? `${speakerMap.get(segment.speaker)}: ` : '';
         const timing = segment.start && segment.end ? ` [${segment.start.toFixed(1)}s - ${segment.end.toFixed(1)}s]` : '';
         return `${speaker}${segment.text}${timing}`;
       })
@@ -111,7 +125,7 @@ router.post('/store', async (req: Request, res: Response) => {
           aiSummary: summary,
           type: 'hardware-transcription',
           segmentCount: transcriptSegments.length.toString(),
-          speakers: [...new Set(transcriptSegments.map(s => s.speaker).filter(Boolean))].join(', '),
+          speakers: Array.from(speakerMap.values()).join(', '),
           ...metadata
         },
       }),
