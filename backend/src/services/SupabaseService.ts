@@ -129,6 +129,24 @@ class SupabaseService {
     if (error || !data) return null;
     return data as any;
   }
+
+  async findDocumentByRecordingId(recordingId: string): Promise<{ id: string } | null> {
+    const { data, error } = await this.supabase
+      .from('documents')
+      .select('id')
+      .eq('recording_id', recordingId)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        // No rows returned, not an error for our use case
+        return null;
+      }
+      throw error;
+    }
+
+    return data as any;
+  }
 }
 
 export default new SupabaseService();

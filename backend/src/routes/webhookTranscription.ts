@@ -37,9 +37,6 @@ interface WebhookTranscriptionRequest {
   };
 }
 
-// In-memory cache to track processed sessions (reset on server restart)
-const processedSessions = new Set<string>();
-
 // POST /api/webhook-transcription/store
 // Store webhook transcriptions in the same format as regular recordings
 router.post('/store', async (req: Request, res: Response) => {
@@ -58,31 +55,28 @@ router.post('/store', async (req: Request, res: Response) => {
     // Generate recording ID if not provided
     const recordingId = providedRecordingId || sessionId || uuidv4();
     
-    // Check if we already processed this session to prevent duplicates
-    const sessionKey = sessionId || recordingId;
-    if (processedSessions.has(sessionKey)) {
-      console.log(`🔄 Skipping duplicate session: ${sessionKey} (already processed)`);
-      return res.json({
-        success: true,
-        message: 'Session already processed',
-        recordingId,
-        sessionId,
-        segmentCount: transcriptSegments.length,
-        skipped: true
-      });
+    // Check database for existing recording to prevent duplicates (serverless-safe)
+    if (sessionId && SupabaseService.isConfigured()) {
+      try {
+        const existingRecord = await SupabaseService.findDocumentByRecordingId(sessionId);
+        if (existingRecord) {
+          console.log(`🔄 Skipping duplicate session: ${sessionId} (found existing record: ${existingRecord.id})`);
+          return res.json({
+            success: true,
+            message: 'Session already processed',
+            recordingId,
+            sessionId,
+            segmentCount: transcriptSegments.length,
+            skipped: true,
+            existingRecordId: existingRecord.id
+          });
+        }
+      } catch (error) {
+        console.warn('Could not check for existing session, continuing with processing:', (error as Error).message);
+      }
     }
     
-    // Mark this session as processed
-    processedSessions.add(sessionKey);
-    console.log(`✅ Processing new session: ${sessionKey}`);
-    
-    // Clean up old sessions periodically (keep only last 1000)
-    if (processedSessions.size > 1000) {
-      const sessionsArray = Array.from(processedSessions);
-      processedSessions.clear();
-      // Keep the latest 500
-      sessionsArray.slice(-500).forEach(s => processedSessions.add(s));
-    }
+    console.log(`✅ Processing new session: ${sessionId || recordingId}`);
     
     console.log(`📝 Storing webhook transcription for recording: ${recordingId}`);
     console.log(`📊 Processing ${transcriptSegments.length} transcript segments`);
