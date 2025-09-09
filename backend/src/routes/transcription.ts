@@ -89,34 +89,49 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
         }
       }
       
-      // Also check for duplicate words/phrases that aren't sentence-terminated
-      if (uniqueSentences.length === 1 && !uniqueSentences[0].match(/[.!?]$/)) {
-        // Handle cases like "word word word" where same phrase repeats
-        const words = uniqueSentences[0].split(/\s+/);
-        const deduplicatedWords: string[] = [];
+      // More aggressive deduplication for all sentences and phrases
+      for (let j = 0; j < uniqueSentences.length; j++) {
+        let sentence = uniqueSentences[j];
+        
+        // Check for pattern: "text. text." or "text, text," (same content repeated)
+        const simpleDuplicatePattern = /^(.+?)([.!?,:;]\s*)\1\2?/;
+        const simpleMatch = sentence.match(simpleDuplicatePattern);
+        if (simpleMatch) {
+          console.log(`🔄 Removing simple duplicate pattern: "${simpleMatch[1]}"`);
+          sentence = simpleMatch[1] + (simpleMatch[2] || '');
+        }
+        
+        // Handle word-level duplicates like "all saying, all saying"
+        const words = sentence.split(/(\s+|[,.:;!?])/); // Split but keep separators
+        const deduplicatedParts: string[] = [];
         let i = 0;
+        
         while (i < words.length) {
-          const word = words[i];
-          // Check if this word starts a phrase that's repeated
-          let phraseLength = 1;
-          let maxPhraseLength = Math.min(10, Math.floor((words.length - i) / 2));
+          let foundDuplicate = false;
           
-          for (let len = maxPhraseLength; len >= 2; len--) {
-            if (i + len * 2 <= words.length) {
-              const phrase1 = words.slice(i, i + len).join(' ').toLowerCase();
-              const phrase2 = words.slice(i + len, i + len * 2).join(' ').toLowerCase();
-              if (phrase1 === phrase2) {
-                phraseLength = len;
+          // Check for repeated phrases of different lengths
+          for (let phraseLen = Math.min(20, Math.floor((words.length - i) / 2)); phraseLen >= 1; phraseLen--) {
+            if (i + phraseLen * 2 <= words.length) {
+              const phrase1 = words.slice(i, i + phraseLen).join('').toLowerCase().replace(/\s+/g, ' ').trim();
+              const phrase2 = words.slice(i + phraseLen, i + phraseLen * 2).join('').toLowerCase().replace(/\s+/g, ' ').trim();
+              
+              if (phrase1 === phrase2 && phrase1.length > 3) {
                 console.log(`🔄 Removing duplicate phrase: "${phrase1}"`);
+                deduplicatedParts.push(...words.slice(i, i + phraseLen));
+                i += phraseLen * 2; // Skip both instances
+                foundDuplicate = true;
                 break;
               }
             }
           }
           
-          deduplicatedWords.push(...words.slice(i, i + phraseLength));
-          i += phraseLength * (phraseLength > 1 ? 2 : 1); // Skip the duplicate if found
+          if (!foundDuplicate) {
+            deduplicatedParts.push(words[i]);
+            i++;
+          }
         }
-        uniqueSentences[0] = deduplicatedWords.join(' ');
+        
+        uniqueSentences[j] = deduplicatedParts.join('').replace(/\s+/g, ' ').trim();
       }
       
       const cleanedTextContent = uniqueSentences.join(' ').trim();
