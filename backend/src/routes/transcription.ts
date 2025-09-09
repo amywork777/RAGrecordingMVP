@@ -57,14 +57,18 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
     const result = await TranscriptionService.transcribeAudio(req.file.buffer, format, speakers);
     const durationSeconds = Math.max(1, Math.round((Date.now() - startMs) / 1000));
 
-    console.log('Raw transcription result (first 100):', result.transcription.substring(0, 100) + '...');
+    console.log('Raw transcription result (first 500):', result.transcription.substring(0, 500));
 
     // Post-process transcription to remove duplicate lines/segments AND duplicate sentences within lines
     const transcriptionLines = result.transcription.split('\n').filter(line => line.trim().length > 0);
     const deduplicatedLines: string[] = [];
     const seenContent = new Set<string>();
     
-    for (const line of transcriptionLines) {
+    console.log(`🐛 DEBUG: Processing ${transcriptionLines.length} transcription lines`);
+    
+    for (let lineIndex = 0; lineIndex < transcriptionLines.length; lineIndex++) {
+      const line = transcriptionLines[lineIndex];
+      console.log(`🐛 DEBUG: Line ${lineIndex}: "${line}"`);
       // Extract speaker prefix and timestamps
       const speakerMatch = line.match(/^(Speaker \d+:\s*)/);
       const timestampMatch = line.match(/(\s*\[\d+\.\d+s - \d+\.\d+s\])\s*$/);
@@ -73,9 +77,11 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
       
       // Get the main text content
       let textContent = line.replace(/^Speaker \d+:\s*/, '').replace(/\s*\[\d+\.\d+s - \d+\.\d+s\]\s*$/, '').trim();
+      console.log(`🐛 DEBUG: Extracted text content: "${textContent}"`);
       
       // Remove duplicate sentences within the same line
       const sentences = textContent.split(/(?<=[.!?])\s+/).filter(s => s.trim());
+      console.log(`🐛 DEBUG: Split into ${sentences.length} sentences:`, sentences);
       const uniqueSentences: string[] = [];
       const seenSentences = new Set<string>();
       
@@ -89,20 +95,24 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
         }
       }
       
+      console.log(`🐛 DEBUG: After sentence dedup, ${uniqueSentences.length} unique sentences:`, uniqueSentences);
+      
       // More aggressive deduplication for all sentences and phrases
       for (let j = 0; j < uniqueSentences.length; j++) {
         let sentence = uniqueSentences[j];
+        console.log(`🐛 DEBUG: Processing sentence ${j}: "${sentence}"`);
         
         // Check for pattern: "text. text." or "text, text," (same content repeated)
         const simpleDuplicatePattern = /^(.+?)([.!?,:;]\s*)\1\2?/;
         const simpleMatch = sentence.match(simpleDuplicatePattern);
         if (simpleMatch) {
-          console.log(`🔄 Removing simple duplicate pattern: "${simpleMatch[1]}"`);
+          console.log(`🔄 Found simple duplicate pattern: "${simpleMatch[1]}" - removing duplicate`);
           sentence = simpleMatch[1] + (simpleMatch[2] || '');
         }
         
         // Handle word-level duplicates like "all saying, all saying"
         const words = sentence.split(/(\s+|[,.:;!?])/); // Split but keep separators
+        console.log(`🐛 DEBUG: Split sentence into ${words.length} word parts:`, words);
         const deduplicatedParts: string[] = [];
         let i = 0;
         
@@ -110,14 +120,18 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
           let foundDuplicate = false;
           
           // Check for repeated phrases of different lengths
-          for (let phraseLen = Math.min(20, Math.floor((words.length - i) / 2)); phraseLen >= 1; phraseLen--) {
+          for (let phraseLen = Math.min(10, Math.floor((words.length - i) / 2)); phraseLen >= 1; phraseLen--) {
             if (i + phraseLen * 2 <= words.length) {
-              const phrase1 = words.slice(i, i + phraseLen).join('').toLowerCase().replace(/\s+/g, ' ').trim();
-              const phrase2 = words.slice(i + phraseLen, i + phraseLen * 2).join('').toLowerCase().replace(/\s+/g, ' ').trim();
+              const phrase1Raw = words.slice(i, i + phraseLen);
+              const phrase2Raw = words.slice(i + phraseLen, i + phraseLen * 2);
+              const phrase1 = phrase1Raw.join('').toLowerCase().replace(/\s+/g, ' ').trim();
+              const phrase2 = phrase2Raw.join('').toLowerCase().replace(/\s+/g, ' ').trim();
               
-              if (phrase1 === phrase2 && phrase1.length > 3) {
-                console.log(`🔄 Removing duplicate phrase: "${phrase1}"`);
-                deduplicatedParts.push(...words.slice(i, i + phraseLen));
+              console.log(`🐛 DEBUG: Comparing phrases (len=${phraseLen}, pos=${i}): "${phrase1}" vs "${phrase2}"`);
+              
+              if (phrase1 === phrase2 && phrase1.length > 1) {
+                console.log(`🔄 Found duplicate phrase: "${phrase1}" - removing duplicate`);
+                deduplicatedParts.push(...phrase1Raw);
                 i += phraseLen * 2; // Skip both instances
                 foundDuplicate = true;
                 break;
@@ -131,15 +145,21 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
           }
         }
         
-        uniqueSentences[j] = deduplicatedParts.join('').replace(/\s+/g, ' ').trim();
+        const processedSentence = deduplicatedParts.join('').replace(/\s+/g, ' ').trim();
+        console.log(`🐛 DEBUG: Processed sentence result: "${processedSentence}"`);
+        uniqueSentences[j] = processedSentence;
       }
       
       const cleanedTextContent = uniqueSentences.join(' ').trim();
       const normalizedForComparison = cleanedTextContent.toLowerCase();
       
+      console.log(`🐛 DEBUG: Final cleaned text content: "${cleanedTextContent}"`);
+      console.log(`🐛 DEBUG: Normalized for comparison: "${normalizedForComparison}"`);
+      
       if (!seenContent.has(normalizedForComparison) && cleanedTextContent.length > 0) {
         seenContent.add(normalizedForComparison);
         const rebuiltLine = speakerPrefix + cleanedTextContent + timestampSuffix;
+        console.log(`✅ Added line: "${rebuiltLine}"`);
         deduplicatedLines.push(rebuiltLine);
       } else if (cleanedTextContent.length > 0) {
         console.log(`🔄 Removing duplicate transcription line: "${line.substring(0, 50)}..."`);
@@ -148,7 +168,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
     
     const deduplicatedTranscription = deduplicatedLines.join('\n');
     console.log(`📊 Transcription deduplication: ${transcriptionLines.length} → ${deduplicatedLines.length} lines`);
-    console.log('Final transcription (first 100):', deduplicatedTranscription.substring(0, 100) + '...');
+    console.log('🐛 DEBUG: Final deduplicatedTranscription first 500 chars:', deduplicatedTranscription.substring(0, 500));
     
     // Use deduplicated transcription
     result.transcription = deduplicatedTranscription;
