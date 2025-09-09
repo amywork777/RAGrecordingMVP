@@ -57,7 +57,31 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
     const result = await TranscriptionService.transcribeAudio(req.file.buffer, format, speakers);
     const durationSeconds = Math.max(1, Math.round((Date.now() - startMs) / 1000));
 
-    console.log('Transcription result (first 100):', result.transcription.substring(0, 100) + '...');
+    console.log('Raw transcription result (first 100):', result.transcription.substring(0, 100) + '...');
+
+    // Post-process transcription to remove duplicate lines/segments
+    const transcriptionLines = result.transcription.split('\n').filter(line => line.trim().length > 0);
+    const deduplicatedLines: string[] = [];
+    const seenContent = new Set<string>();
+    
+    for (const line of transcriptionLines) {
+      // Extract just the text content (remove "Speaker X: " prefix and timestamps)
+      const textContent = line.replace(/^Speaker \d+:\s*/, '').replace(/\s*\[\d+\.\d+s - \d+\.\d+s\]$/, '').trim().toLowerCase();
+      
+      if (!seenContent.has(textContent) && textContent.length > 0) {
+        seenContent.add(textContent);
+        deduplicatedLines.push(line);
+      } else if (textContent.length > 0) {
+        console.log(`🔄 Removing duplicate transcription line: "${line.substring(0, 50)}..."`);
+      }
+    }
+    
+    const deduplicatedTranscription = deduplicatedLines.join('\n');
+    console.log(`📊 Transcription deduplication: ${transcriptionLines.length} → ${deduplicatedLines.length} lines`);
+    console.log('Final transcription (first 100):', deduplicatedTranscription.substring(0, 100) + '...');
+    
+    // Use deduplicated transcription
+    result.transcription = deduplicatedTranscription;
 
     // Store in ZeroEntropy using REST API (SDK fails in Vercel serverless)
     const collection_name = 'ai-wearable-transcripts';
