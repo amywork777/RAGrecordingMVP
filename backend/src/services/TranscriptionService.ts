@@ -180,7 +180,17 @@ class TranscriptionService {
             merged.push({ speaker: u.speaker, text: (u.text || '').trim(), dur: durSec });
           }
         }
-        const formattedText = merged.map(seg => `Speaker ${seg.speaker}: ${seg.text}`).join('\n');
+        
+        // Create consistent speaker mapping (normalize speaker IDs to 1, 2, 3...)
+        const speakerIdMap = new Map<number, number>();
+        let nextId = 1;
+        for (const seg of merged) {
+          if (!speakerIdMap.has(seg.speaker)) {
+            speakerIdMap.set(seg.speaker, nextId++);
+          }
+        }
+        
+        const formattedText = merged.map(seg => `Speaker ${speakerIdMap.get(seg.speaker)}: ${seg.text}`).join('\n');
         try { fs.unlinkSync(tempFilePath); } catch {}
         return formattedText;
       }
