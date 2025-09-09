@@ -59,19 +59,74 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
 
     console.log('Raw transcription result (first 100):', result.transcription.substring(0, 100) + '...');
 
-    // Post-process transcription to remove duplicate lines/segments
+    // Post-process transcription to remove duplicate lines/segments AND duplicate sentences within lines
     const transcriptionLines = result.transcription.split('\n').filter(line => line.trim().length > 0);
     const deduplicatedLines: string[] = [];
     const seenContent = new Set<string>();
     
     for (const line of transcriptionLines) {
-      // Extract just the text content (remove "Speaker X: " prefix and timestamps)
-      const textContent = line.replace(/^Speaker \d+:\s*/, '').replace(/\s*\[\d+\.\d+s - \d+\.\d+s\]$/, '').trim().toLowerCase();
+      // Extract speaker prefix and timestamps
+      const speakerMatch = line.match(/^(Speaker \d+:\s*)/);
+      const timestampMatch = line.match(/(\s*\[\d+\.\d+s - \d+\.\d+s\])\s*$/);
+      const speakerPrefix = speakerMatch ? speakerMatch[1] : '';
+      const timestampSuffix = timestampMatch ? timestampMatch[1] : '';
       
-      if (!seenContent.has(textContent) && textContent.length > 0) {
-        seenContent.add(textContent);
-        deduplicatedLines.push(line);
-      } else if (textContent.length > 0) {
+      // Get the main text content
+      let textContent = line.replace(/^Speaker \d+:\s*/, '').replace(/\s*\[\d+\.\d+s - \d+\.\d+s\]\s*$/, '').trim();
+      
+      // Remove duplicate sentences within the same line
+      const sentences = textContent.split(/(?<=[.!?])\s+/).filter(s => s.trim());
+      const uniqueSentences: string[] = [];
+      const seenSentences = new Set<string>();
+      
+      for (const sentence of sentences) {
+        const normalizedSentence = sentence.trim().toLowerCase().replace(/[.!?]+$/, '');
+        if (!seenSentences.has(normalizedSentence) && normalizedSentence.length > 3) {
+          seenSentences.add(normalizedSentence);
+          uniqueSentences.push(sentence);
+        } else if (normalizedSentence.length > 3) {
+          console.log(`🔄 Removing duplicate sentence: "${sentence.substring(0, 40)}..."`);
+        }
+      }
+      
+      // Also check for duplicate words/phrases that aren't sentence-terminated
+      if (uniqueSentences.length === 1 && !uniqueSentences[0].match(/[.!?]$/)) {
+        // Handle cases like "word word word" where same phrase repeats
+        const words = uniqueSentences[0].split(/\s+/);
+        const deduplicatedWords: string[] = [];
+        let i = 0;
+        while (i < words.length) {
+          const word = words[i];
+          // Check if this word starts a phrase that's repeated
+          let phraseLength = 1;
+          let maxPhraseLength = Math.min(10, Math.floor((words.length - i) / 2));
+          
+          for (let len = maxPhraseLength; len >= 2; len--) {
+            if (i + len * 2 <= words.length) {
+              const phrase1 = words.slice(i, i + len).join(' ').toLowerCase();
+              const phrase2 = words.slice(i + len, i + len * 2).join(' ').toLowerCase();
+              if (phrase1 === phrase2) {
+                phraseLength = len;
+                console.log(`🔄 Removing duplicate phrase: "${phrase1}"`);
+                break;
+              }
+            }
+          }
+          
+          deduplicatedWords.push(...words.slice(i, i + phraseLength));
+          i += phraseLength * (phraseLength > 1 ? 2 : 1); // Skip the duplicate if found
+        }
+        uniqueSentences[0] = deduplicatedWords.join(' ');
+      }
+      
+      const cleanedTextContent = uniqueSentences.join(' ').trim();
+      const normalizedForComparison = cleanedTextContent.toLowerCase();
+      
+      if (!seenContent.has(normalizedForComparison) && cleanedTextContent.length > 0) {
+        seenContent.add(normalizedForComparison);
+        const rebuiltLine = speakerPrefix + cleanedTextContent + timestampSuffix;
+        deduplicatedLines.push(rebuiltLine);
+      } else if (cleanedTextContent.length > 0) {
         console.log(`🔄 Removing duplicate transcription line: "${line.substring(0, 50)}..."`);
       }
     }
