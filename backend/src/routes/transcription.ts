@@ -234,8 +234,25 @@ router.post('/transcribe/text', async (req: Request, res: Response) => {
         }
       }
 
-      // Combine segments with consolidated speaker names
-      transcriptionText = transcriptSegments
+      // Deduplicate segments by text content to prevent duplicate text within transcription
+      const deduplicatedSegments: any[] = [];
+      const seenTexts = new Set<string>();
+      
+      for (const segment of transcriptSegments) {
+        const normalizedText = segment.text.trim().toLowerCase();
+        
+        if (!seenTexts.has(normalizedText) && normalizedText.length > 0) {
+          seenTexts.add(normalizedText);
+          deduplicatedSegments.push(segment);
+        } else {
+          console.log(`🔄 Skipping duplicate segment: "${segment.text.substring(0, 50)}..."`);
+        }
+      }
+      
+      console.log(`📊 Deduplicated segments: ${transcriptSegments.length} → ${deduplicatedSegments.length}`);
+
+      // Combine deduplicated segments with consolidated speaker names
+      transcriptionText = deduplicatedSegments
         .map((segment: any) => {
           const speaker = segment.speaker ? `${speakerMap.get(segment.speaker) || segment.speaker}: ` : '';
           const timing = segment.start && segment.end ? ` [${segment.start.toFixed(1)}s - ${segment.end.toFixed(1)}s]` : '';

@@ -131,8 +131,25 @@ router.post('/store', async (req: Request, res: Response) => {
     console.log(`🎤 Identified ${consolidatedSpeakers.size} unique speakers:`, Array.from(consolidatedSpeakers).join(', '));
     console.log(`🎤 Speaker mappings: ${Array.from(speakerMap.entries()).map(([orig, cons]) => `${orig}→${cons}`).join(', ')}`);
 
-    // Combine all segments into a single transcript text with consolidated speaker names
-    const fullTranscript = transcriptSegments
+    // Deduplicate segments by text content to prevent duplicate text within transcription
+    const deduplicatedSegments: WebhookTranscriptSegment[] = [];
+    const seenTexts = new Set<string>();
+    
+    for (const segment of transcriptSegments) {
+      const normalizedText = segment.text.trim().toLowerCase();
+      
+      if (!seenTexts.has(normalizedText) && normalizedText.length > 0) {
+        seenTexts.add(normalizedText);
+        deduplicatedSegments.push(segment);
+      } else {
+        console.log(`🔄 Skipping duplicate segment: "${segment.text.substring(0, 50)}..."`);
+      }
+    }
+    
+    console.log(`📊 Deduplicated segments: ${transcriptSegments.length} → ${deduplicatedSegments.length}`);
+
+    // Combine deduplicated segments into a single transcript text with consolidated speaker names
+    const fullTranscript = deduplicatedSegments
       .map(segment => {
         const speaker = segment.speaker ? `${speakerMap.get(segment.speaker)}: ` : '';
         const timing = segment.start && segment.end ? ` [${segment.start.toFixed(1)}s - ${segment.end.toFixed(1)}s]` : '';
