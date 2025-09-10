@@ -112,6 +112,11 @@ interface SearchResult {
   timestamp: string;
   recordingId: string;
   score: number;
+  // Additional fields from the new transcriptions endpoint
+  title?: string;
+  summary?: string;
+  path?: string;
+  source?: string;
 }
 
 interface SearchResponse {
@@ -215,15 +220,38 @@ class APIService {
   }
 
   async getRecentTranscripts(limit: number = 10): Promise<SearchResult[]> {
-    // Use the correct endpoint that has proper sorting and timestamp functionality
-    const response = await fetch(`${API_BASE_URL}/api/transcripts/recent?limit=${limit}`);
+    // Use the NEW transcriptions endpoint that was just added
+    console.log(`Fetching recent transcripts from: ${API_BASE_URL}/api/transcriptions`);
+    const response = await fetchWithFallback(`${API_BASE_URL}/api/transcriptions?limit=${limit}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch recent transcripts: ${response.statusText}`);
+      throw new Error(`Failed to fetch recent transcripts: ${response.status} ${response.statusText}`);
     }
 
-    const results = await response.json();
-    console.log(`Fetched ${results.length} recent transcripts with proper sorting`);
+    const data = await response.json();
+    console.log(`✅ Fetched ${data.transcriptions?.length || 0} transcripts from NEW endpoint`);
+    
+    // Transform the backend response to match the expected SearchResult format
+    const transcriptions = data.transcriptions || [];
+    const results: SearchResult[] = transcriptions.map((t: any) => ({
+      id: t.id,
+      text: t.transcription || t.text || '[No content]',
+      timestamp: t.timestamp,
+      recordingId: t.recordingId,
+      score: t.score || 1.0,
+      // Additional fields for compatibility
+      title: t.title,
+      summary: t.summary,
+      path: t.path,
+      source: t.source,
+    }));
+    
+    console.log(`✅ Transformed ${results.length} transcriptions for mobile app`);
     return results;
   }
 
