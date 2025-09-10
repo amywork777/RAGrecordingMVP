@@ -607,4 +607,97 @@ router.post('/transcribe/batch', upload.array('audio', 10), async (req: Request,
   }
 });
 
+// GET /api/transcriptions - Get recent transcriptions
+router.get('/transcriptions', async (req: Request, res: Response) => {
+  try {
+    const { limit = 20, offset = 0 } = req.query;
+    
+    console.log(`📋 Fetching recent transcriptions (limit: ${limit}, offset: ${offset})`);
+    
+    // Try to get transcriptions from Supabase first (if configured)
+    if (SupabaseService.isConfigured()) {
+      try {
+        const transcriptions = await SupabaseService.getRecentTranscriptions(
+          parseInt(limit as string), 
+          parseInt(offset as string)
+        );
+        
+        if (transcriptions && transcriptions.length > 0) {
+          console.log(`✅ Found ${transcriptions.length} transcriptions from Supabase`);
+          return res.json({
+            transcriptions: transcriptions.map(t => ({
+              id: t.id || t.ze_document_id || t.ze_path,
+              recordingId: t.recording_id,
+              title: t.title || t.ai_title || 'Untitled Recording',
+              summary: t.summary || t.ai_summary || '',
+              timestamp: t.timestamp,
+              transcription: t.transcription || '',
+              path: t.ze_path,
+              source: t.source || 'unknown',
+              duration: t.duration_seconds,
+              mimeType: t.mime_type
+            })),
+            total: transcriptions.length,
+            limit: parseInt(limit as string),
+            offset: parseInt(offset as string)
+          });
+        }
+      } catch (supabaseError) {
+        console.warn('Supabase query failed, falling back to ZeroEntropy search:', (supabaseError as Error).message);
+      }
+    }
+    
+    // Fallback: Use ZeroEntropy search to find recent transcriptions
+    try {
+      const ZeroEntropyService = (await import('../services/ZeroEntropyService')).default;
+      const searchResults = await ZeroEntropyService.search('recording transcription', parseInt(limit as string) || 20);
+      
+      console.log(`✅ Found ${searchResults.length} transcriptions from ZeroEntropy search`);
+      
+      const transcriptions = searchResults.map((result, index) => ({
+        id: result.id || result.path || `transcription-${Date.now()}-${index}`,
+        recordingId: result.metadata?.recordingId || result.id || `unknown-${index}`,
+        title: result.metadata?.aiTitle || result.metadata?.topic || result.title || 'Untitled Recording',
+        summary: result.metadata?.aiSummary || result.summary || (result.text.length > 200 ? result.text.substring(0, 200) + '...' : result.text),
+        timestamp: result.metadata?.timestamp || new Date().toISOString(),
+        transcription: result.text || '',
+        path: result.path || '',
+        source: result.metadata?.source || 'zeroentropy-search',
+        score: result.score,
+        duration: null,
+        mimeType: 'text/plain'
+      }));
+      
+      return res.json({
+        transcriptions,
+        total: transcriptions.length,
+        limit: parseInt(limit as string) || 20,
+        offset: parseInt(offset as string) || 0,
+        source: 'zeroentropy-search'
+      });
+      
+    } catch (zeroEntropyError) {
+      console.error('ZeroEntropy search failed:', (zeroEntropyError as Error).message);
+      
+      // Last resort: return empty list with helpful message
+      return res.json({
+        transcriptions: [],
+        total: 0,
+        limit: parseInt(limit as string) || 20,
+        offset: parseInt(offset as string) || 0,
+        message: 'No transcriptions found. Make sure transcriptions are being saved properly.',
+        error: 'Could not retrieve transcriptions from any source'
+      });
+    }
+    
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Error fetching transcriptions:', errorMessage);
+    res.status(500).json({ 
+      error: 'Failed to fetch transcriptions',
+      details: errorMessage
+    });
+  }
+});
+
 export default router;

@@ -16,6 +16,9 @@ interface SearchResult {
   text: string;
   score: number;
   metadata: any;
+  path?: string;
+  title?: string;
+  summary?: string;
 }
 
 class ZeroEntropyService {
@@ -125,14 +128,21 @@ class ZeroEntropyService {
 
                 if (contentResponse.ok) {
                   const contentData: any = await contentResponse.json();
+                  const metadata = contentData.document?.metadata || {};
                   return {
                     id: result.path || 'unknown',
                     text: contentData.document?.content || result.path,
                     score: result.score || 0.95,
+                    path: result.path,
+                    title: metadata.aiTitle || metadata.topic || 'Recording',
+                    summary: metadata.aiSummary || '',
                     metadata: {
                       timestamp: contentData.document?.created_at || new Date().toISOString(),
                       recordingId: result.path?.split('_')[1] || 'unknown',
-                      topic: contentData.document?.metadata?.topic || 'Recording'
+                      topic: metadata.topic || 'Recording',
+                      aiTitle: metadata.aiTitle,
+                      aiSummary: metadata.aiSummary,
+                      ...metadata
                     }
                   };
                 } else {
@@ -141,6 +151,9 @@ class ZeroEntropyService {
                     id: result.path || 'unknown',
                     text: result.path || 'No content available',
                     score: result.score || 0.95,
+                    path: result.path,
+                    title: 'Recording',
+                    summary: '',
                     metadata: {
                       timestamp: new Date().toISOString(),
                       recordingId: result.path?.split('_')[1] || 'unknown',
@@ -154,6 +167,9 @@ class ZeroEntropyService {
                   id: result.path || 'unknown',
                   text: result.path || 'No content available',
                   score: result.score || 0.95,
+                  path: result.path,
+                  title: 'Recording',
+                  summary: '',
                   metadata: {
                     timestamp: new Date().toISOString(),
                     recordingId: result.path?.split('_')[1] || 'unknown',

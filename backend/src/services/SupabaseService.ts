@@ -131,7 +131,10 @@ class SupabaseService {
   }
 
   async findDocumentByRecordingId(recordingId: string): Promise<{ id: string } | null> {
-    const { data, error } = await this.supabase
+    const supabase = this.getClient();
+    if (!supabase) return null;
+    
+    const { data, error } = await supabase
       .from('documents')
       .select('id')
       .eq('recording_id', recordingId)
@@ -146,6 +149,59 @@ class SupabaseService {
     }
 
     return data as any;
+  }
+
+  async getRecentTranscriptions(limit: number = 20, offset: number = 0): Promise<any[] | null> {
+    const supabase = this.getClient();
+    if (!supabase) return null;
+
+    const { data, error } = await supabase
+      .from('documents')
+      .select(`
+        id,
+        ze_document_id,
+        ze_path,
+        recording_id,
+        timestamp,
+        topic,
+        mime_type,
+        original_name,
+        size_bytes,
+        source,
+        duration_seconds,
+        ai_annotations!inner (
+          title,
+          summary,
+          is_latest
+        )
+      `)
+      .eq('ai_annotations.is_latest', true)
+      .order('timestamp', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (error) {
+      console.error('Supabase getRecentTranscriptions error:', error);
+      return null;
+    }
+
+    // Flatten the ai_annotations data
+    return data?.map(doc => ({
+      id: doc.id,
+      ze_document_id: doc.ze_document_id,
+      ze_path: doc.ze_path,
+      recording_id: doc.recording_id,
+      timestamp: doc.timestamp,
+      topic: doc.topic,
+      mime_type: doc.mime_type,
+      original_name: doc.original_name,
+      size_bytes: doc.size_bytes,
+      source: doc.source,
+      duration_seconds: doc.duration_seconds,
+      ai_title: (doc.ai_annotations as any)?.[0]?.title,
+      ai_summary: (doc.ai_annotations as any)?.[0]?.summary,
+      title: (doc.ai_annotations as any)?.[0]?.title,
+      summary: (doc.ai_annotations as any)?.[0]?.summary,
+    })) || null;
   }
 }
 
