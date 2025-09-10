@@ -258,4 +258,43 @@ Respond in JSON format:
   }
 });
 
+// GET /api/transcripts/recent - Legacy endpoint for mobile app compatibility
+router.get('/transcripts/recent', async (req: Request, res: Response) => {
+  try {
+    const { limit = 10 } = req.query;
+    
+    console.log(`📱 Mobile app fetching recent transcripts (limit: ${limit})`);
+    
+    // Use ZeroEntropy search to find recent transcriptions
+    const searchResults = await ZeroEntropyService.search('recording transcription', parseInt(limit as string) || 10);
+    
+    console.log(`✅ Found ${searchResults.length} transcriptions for mobile app`);
+    
+    // Transform to the format the mobile app expects (SearchResult[])
+    const results = searchResults.map((result, index) => ({
+      id: result.id || result.path || `transcription-${Date.now()}-${index}`,
+      text: result.text || '',
+      timestamp: result.metadata?.timestamp || new Date().toISOString(),
+      recordingId: result.metadata?.recordingId || result.id || `unknown-${index}`,
+      score: result.score || 1.0,
+      // Additional helpful fields
+      aiTitle: result.metadata?.aiTitle || result.metadata?.topic || result.title || 'Untitled Recording',
+      aiSummary: result.metadata?.aiSummary || result.summary || '',
+      topic: result.metadata?.topic || result.metadata?.aiTitle || result.title || '',
+    }));
+    
+    // Mobile app expects a direct array, not nested in an object
+    console.log(`📱 Returning ${results.length} transcripts to mobile app`);
+    res.json(results);
+    
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Error fetching recent transcripts for mobile:', errorMessage);
+    res.status(500).json({ 
+      error: 'Failed to fetch recent transcripts',
+      details: errorMessage
+    });
+  }
+});
+
 export default router;
