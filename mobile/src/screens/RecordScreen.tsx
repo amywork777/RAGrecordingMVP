@@ -25,7 +25,6 @@ import uuid from 'react-native-uuid';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import SecureStorageService from '../services/SecureStorageService';
-import WebhookService from '../services/WebhookService';
 import OmiBluetoothService from '../services/OmiBluetoothService';
 import OmiAudioStreamService from '../services/OmiAudioStreamService';
 import OmiDevicePairing from '../components/OmiDevicePairing';
@@ -72,13 +71,6 @@ export default function RecordScreen({ route }: any) {
   const [filteredTranscripts, setFilteredTranscripts] = useState<Transcript[]>([]);
   const [showUploadOptions, setShowUploadOptions] = useState(false);
 
-  // Webhook integration states
-  const [isWebhookMonitoring, setIsWebhookMonitoring] = useState(false);
-  const [isTranscriptionCollapsed, setIsTranscriptionCollapsed] = useState(false);
-  const [isHardwareRecording, setIsHardwareRecording] = useState(false);
-  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
-  const [realtimeTranscripts, setRealtimeTranscripts] = useState<any[]>([]);
-  const [webhookRecordingDuration, setWebhookRecordingDuration] = useState(0);
 
   // Omi device integration states
   const [omiDeviceConnected, setOmiDeviceConnected] = useState(false);
@@ -140,14 +132,6 @@ export default function RecordScreen({ route }: any) {
   }, [isRecording, isBackgroundRecording]);
 
   useEffect(() => {
-    // Setup webhook event listeners
-    WebhookService.on('recordingStarted', handleWebhookRecordingStarted);
-    WebhookService.on('liveTranscript', handleWebhookLiveTranscript);
-    WebhookService.on('recordingEnded', handleWebhookRecordingEnded);
-    WebhookService.on('conversationCompleted', handleConversationCompleted);
-    WebhookService.on('monitoringStarted', () => setIsWebhookMonitoring(true));
-    WebhookService.on('monitoringStopped', () => setIsWebhookMonitoring(false));
-
     // Setup Omi event listeners
     OmiBluetoothService.on('deviceConnected', handleOmiDeviceConnected);
     OmiBluetoothService.on('deviceDisconnected', handleOmiDeviceDisconnected);
@@ -156,12 +140,7 @@ export default function RecordScreen({ route }: any) {
 
     loadTranscriptsFromBackend();
 
-    // Auto-start webhook monitoring
-    WebhookService.startMonitoring();
-
     return () => {
-      WebhookService.removeAllListeners();
-      WebhookService.stopMonitoring();
       OmiBluetoothService.removeAllListeners();
       OmiAudioStreamService.removeAllListeners();
       if (intervalId) clearInterval(intervalId);

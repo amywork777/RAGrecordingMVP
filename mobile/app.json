@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Tai",
-    "slug": "app",
-    "scheme": "tai",
+    "name": "TaiMVP",
+    "slug": "taimvp",
+    "scheme": "taimvp",
     "owner": "amzyst",
     "version": "1.0.1",
     "orientation": "portrait",
@@ -31,12 +31,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.taiyaki.tai",
+      "bundleIdentifier": "com.taiyaki.taimvp",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSMicrophoneUsageDescription": "This app needs access to the microphone to record audio for transcription.",
-        "NSBluetoothAlwaysUsageDescription": "This app needs Bluetooth access to connect to XIAO recording devices for audio file transfer.",
-        "NSBluetoothPeripheralUsageDescription": "This app needs Bluetooth access to connect to XIAO recording devices for audio file transfer.",
+        "NSBluetoothAlwaysUsageDescription": "This app needs Bluetooth access to connect to Omi recording devices for audio streaming.",
+        "NSBluetoothPeripheralUsageDescription": "This app needs Bluetooth access to connect to Omi recording devices for audio streaming.",
         "UIBackgroundModes": [
           "audio",
           "bluetooth-central"
@@ -55,14 +55,14 @@
         "android.permission.BLUETOOTH_ADMIN",
         "android.permission.BLUETOOTH_CONNECT"
       ],
-      "package": "com.taiyaki.tai"
+      "package": "com.taiyaki.taimvp"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "extra": {
       "eas": {
-        "projectId": "dab6d1d9-5c03-49e7-847e-c804931d8860"
+        "projectId": "4a3b0be3-83cf-4cba-88e3-ad4c4a12ca1a"
       }
     }
   }
