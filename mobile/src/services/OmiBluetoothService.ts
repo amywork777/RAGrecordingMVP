@@ -17,16 +17,36 @@ interface AudioChunk {
 type EventCallback = (...args: any[]) => void;
 
 class OmiBluetoothService {
-  private omiConnection: OmiConnection;
+  private omiConnection: OmiConnection | null = null;
   private connectedDevice: OmiDevice | null = null;
   private isScanning = false;
   private isStreaming = false;
   private audioBufferCallback?: (audioChunk: AudioChunk) => void;
   private listeners: Map<string, EventCallback[]> = new Map();
+  private isInitialized = false;
 
   constructor() {
-    this.omiConnection = new OmiConnection();
-    this.setupEventListeners();
+    // Don't initialize OmiConnection immediately - wait for first use
+  }
+
+  private async initializeConnection(): Promise<boolean> {
+    if (this.isInitialized) {
+      return this.omiConnection !== null;
+    }
+
+    try {
+      console.log('🔧 Initializing Omi connection...');
+      this.omiConnection = new OmiConnection();
+      this.setupEventListeners();
+      this.isInitialized = true;
+      console.log('✅ Omi connection initialized successfully');
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to initialize Omi connection:', error);
+      this.emit('initializationError', error);
+      this.isInitialized = true; // Mark as attempted
+      return false;
+    }
   }
 
   // Event emitter methods
@@ -59,6 +79,11 @@ class OmiBluetoothService {
   }
 
   private setupEventListeners(): void {
+    if (!this.omiConnection) {
+      console.error('❌ Cannot setup event listeners - OmiConnection not initialized');
+      return;
+    }
+
     // Connection events
     this.omiConnection.onConnectionStateChanged = (isConnected: boolean, device?: any) => {
       if (isConnected && device) {
@@ -138,6 +163,14 @@ class OmiBluetoothService {
       return [];
     }
 
+    // Initialize connection if needed
+    const initialized = await this.initializeConnection();
+    if (!initialized || !this.omiConnection) {
+      console.error('❌ Failed to initialize Omi connection');
+      this.emit('scanError', new Error('Failed to initialize Omi connection'));
+      return [];
+    }
+
     console.log('🔍 Starting Omi device scan...');
     this.isScanning = true;
     
@@ -166,6 +199,14 @@ class OmiBluetoothService {
   }
 
   async connectToDevice(deviceId: string): Promise<boolean> {
+    // Initialize connection if needed
+    const initialized = await this.initializeConnection();
+    if (!initialized || !this.omiConnection) {
+      console.error('❌ Failed to initialize Omi connection');
+      this.emit('connectionError', new Error('Failed to initialize Omi connection'));
+      return false;
+    }
+
     if (this.connectedDevice) {
       console.warn('⚠️ Already connected to a device, disconnecting first...');
       await this.disconnect();
