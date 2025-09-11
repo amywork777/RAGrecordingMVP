@@ -92,7 +92,6 @@ scanTimeout: 10000             // 10 second device discovery
 - **Buffer progress** visualization
 
 ### Integration with Existing Features
-- **Parallel operation** with XIAO device auto-scanning
 - **Webhook monitoring** continues during Omi streaming
 - **Built-in recording** remains independent
 - **Chat interface** works with all audio sources
@@ -105,7 +104,7 @@ scanTimeout: 10000             // 10 second device discovery
 - [ ] Real-time transcription appears
 - [ ] Final transcripts save to history
 - [ ] Connection survives app backgrounding
-- [ ] Multiple audio sources work independently
+- [ ] Both audio sources work independently
 - [ ] UI remains responsive during streaming
 
 ## 🐛 Common Issues
@@ -156,10 +155,9 @@ scanTimeout: 10000             // 10 second device discovery
 
 ## 🎉 Ready to Go!
 
-Your RAGrecordingMVP now has full Omi integration while preserving all existing functionality. The app supports three audio input methods working in parallel:
+Your RAGrecordingMVP now has full Omi integration while preserving essential functionality. The app supports two audio input methods working independently:
 
 1. **Built-in Recording** (preserved)
-2. **XIAO Hardware** (preserved) 
-3. **Omi Devices** (new!)
+2. **Omi Devices** (new!)
 
 Enjoy seamless voice recording and intelligent transcription! 🚀

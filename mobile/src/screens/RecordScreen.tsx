@@ -18,8 +18,6 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import BLEService from '../services/BLEService';
-import BLEFileTransferService from '../services/BLEFileTransferService';
 import APIService from '../services/APIService';
 import AudioRecordingService from '../services/AudioRecordingService';
 import DeepLinkService from '../services/DeepLinkService';
@@ -36,11 +34,6 @@ import { Buffer } from 'buffer';
 import { useTheme, spacing, borderRadius, typography, shadows } from '../theme/colors';
 
 const { width } = Dimensions.get('window');
-
-// Auto-scan configuration
-const AUTO_SCAN_STORAGE_KEY = 'auto_scan_enabled';
-const AUTO_SCAN_INTERVAL_MS = 30000; // 30 seconds
-const AUTO_SCAN_TIMEOUT_MS = 8000; // 8 seconds scan duration
 
 interface Transcript {
   id: string;
@@ -63,7 +56,6 @@ export default function RecordScreen({ route }: any) {
   const colors = useTheme();
   const styles = createStyles(colors);
   const navigation = useNavigation();
-  const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isBackgroundRecording, setIsBackgroundRecording] = useState(false);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
@@ -78,21 +70,7 @@ export default function RecordScreen({ route }: any) {
   const scrollViewRef = useRef<ScrollView>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredTranscripts, setFilteredTranscripts] = useState<Transcript[]>([]);
-  
-  // BLE device states
-  const [availableDevices, setAvailableDevices] = useState<any[]>([]);
-  const [selectedDevice, setSelectedDevice] = useState<any | null>(null);
-  const [isScanning, setIsScanning] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncProgress, setSyncProgress] = useState(0);
   const [showUploadOptions, setShowUploadOptions] = useState(false);
-  
-  // Auto-scanning states - always enabled
-  const [autoScanEnabled, setAutoScanEnabled] = useState(true);
-  const [isAutoScanning, setIsAutoScanning] = useState(false);
-  const [lastAutoScanTime, setLastAutoScanTime] = useState<Date | null>(null);
-  const [autoScanInterval, setAutoScanInterval] = useState<NodeJS.Timeout | null>(null);
-  const [appState, setAppState] = useState(AppState.currentState);
 
   // Webhook integration states
   const [isWebhookMonitoring, setIsWebhookMonitoring] = useState(false);
@@ -162,10 +140,6 @@ export default function RecordScreen({ route }: any) {
   }, [isRecording, isBackgroundRecording]);
 
   useEffect(() => {
-    BLEService.on('deviceConnected', handleDeviceConnected);
-    BLEService.on('deviceDisconnected', handleDeviceDisconnected);
-    BLEService.on('audioChunk', handleAudioChunk);
-
     // Setup webhook event listeners
     WebhookService.on('recordingStarted', handleWebhookRecordingStarted);
     WebhookService.on('liveTranscript', handleWebhookLiveTranscript);
@@ -186,7 +160,6 @@ export default function RecordScreen({ route }: any) {
     WebhookService.startMonitoring();
 
     return () => {
-      BLEService.removeAllListeners();
       WebhookService.removeAllListeners();
       WebhookService.stopMonitoring();
       OmiBluetoothService.removeAllListeners();
@@ -195,51 +168,6 @@ export default function RecordScreen({ route }: any) {
     };
   }, [currentRecordingId]);
 
-  // Load auto-scan preference from storage
-  useEffect(() => {
-    loadAutoScanPreference();
-  }, []);
-
-  // Handle app state changes for smart scanning
-  useEffect(() => {
-    const handleAppStateChange = (nextAppState: string) => {
-      console.log('App state changed:', appState, '->', nextAppState);
-      setAppState(nextAppState);
-      
-      // Log background transition for debugging
-      if (nextAppState.match(/inactive|background/)) {
-        console.log('App backgrounded - relying on iOS background modes for BLE scanning');
-      } else if (nextAppState === 'active') {
-        console.log('App foregrounded - full scanning capabilities restored');
-      }
-      
-      // Always keep auto-scanning running in all states if enabled
-      if (autoScanEnabled && !autoScanInterval) {
-        console.log('Auto-scan enabled, maintaining continuous scanning');
-        startAutoScan();
-      }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription?.remove();
-  }, [autoScanEnabled, appState, autoScanInterval]);
-
-  // Manage auto-scan interval - runs in all app states
-  useEffect(() => {
-    if (autoScanEnabled && !isScanning && !isSyncing) {
-      console.log('Starting continuous auto-scan (all app states)');
-      startAutoScan();
-    } else if (!autoScanEnabled) {
-      console.log('Stopping auto-scan (disabled by user)');
-      stopAutoScan();
-    }
-
-    return () => {
-      if (autoScanInterval) {
-        clearInterval(autoScanInterval);
-      }
-    };
-  }, [autoScanEnabled, isScanning, isSyncing]);
 
   // Handle navigation from Chat screen
   useEffect(() => {
@@ -412,38 +340,6 @@ export default function RecordScreen({ route }: any) {
     Alert.alert('Copied', 'Report copied to clipboard');
   };
 
-  const handleDeviceConnected = () => {
-    setIsConnected(true);
-    Alert.alert('Connected', 'Successfully connected to AI Wearable');
-  };
-
-  const handleDeviceDisconnected = () => {
-    setIsConnected(false);
-    setIsRecording(false);
-    Alert.alert('Disconnected', 'Disconnected from AI Wearable');
-  };
-
-  const handleAudioChunk = async (audioData: ArrayBuffer) => {
-    if (!currentRecordingId) return;
-
-    try {
-      const response = await APIService.sendAudioBase64(audioData.toString(), currentRecordingId);
-      
-      if (response.transcription) {
-        const newTranscript: Transcript = {
-          id: uuid.v4() as string,
-          text: response.transcription,
-          title: response.title,
-          summary: response.summary,
-          timestamp: new Date(response.timestamp),
-        };
-        
-        setTranscripts(prev => [newTranscript, ...prev]);
-      }
-    } catch (error) {
-      console.error('Error processing audio chunk:', error);
-    }
-  };
 
   // Omi event handlers
   const handleOmiDeviceConnected = (device: any) => {
@@ -862,346 +758,6 @@ export default function RecordScreen({ route }: any) {
     }
   };
 
-  // BLE Functions
-  const scanForDevices = async () => {
-    try {
-      setIsScanning(true);
-      console.log('Starting scan for XIAO-REC devices...');
-      
-      const devices = await BLEFileTransferService.scanForDevices(10000);
-      setAvailableDevices(devices);
-      
-      if (devices.length === 0) {
-        Alert.alert('No devices found', 'Make sure your XIAO device finished recording and is advertising (switch is in LOW position)');
-      } else if (devices.length === 1) {
-        // Auto-select if only one device
-        setSelectedDevice(devices[0]);
-        console.log(`Auto-selected device: ${devices[0].name}`);
-      }
-      
-      console.log(`Found ${devices.length} XIAO-REC devices`);
-    } catch (error) {
-      console.error('Device scan failed:', error);
-      Alert.alert('Scan Failed', 'Failed to scan for devices. Make sure Bluetooth is enabled.');
-    } finally {
-      setIsScanning(false);
-    }
-  };
-
-  const autoSyncFromDevice = async () => {
-    try {
-      setIsScanning(true);
-      setIsSyncing(false);
-      setSyncProgress(0);
-      console.log('Auto-sync: Starting scan for XIAO devices...');
-      
-      // Scan for devices
-      const devices = await BLEFileTransferService.scanForDevices(10000); // 10 second scan
-      setAvailableDevices(devices);
-      
-      if (devices.length === 0) {
-        Alert.alert(
-          'No XIAO Device Found', 
-          'Make sure your XIAO device finished recording and switch is in LOW position to start advertising.'
-        );
-        return;
-      }
-      
-      // Auto-select first XIAO device found
-      const xiaoDevice = devices[0];
-      setSelectedDevice(xiaoDevice);
-      console.log(`Auto-sync: Found ${devices.length} devices, connecting to: ${xiaoDevice.name} (${xiaoDevice.id})`);
-      
-      // Immediately start syncing
-      setIsScanning(false);
-      setIsSyncing(true);
-      
-      await performSync(xiaoDevice);
-      
-    } catch (error) {
-      console.error('Auto-sync failed:', error);
-      Alert.alert('Auto-Sync Failed', `Failed to sync: ${error.message}`);
-    } finally {
-      setIsScanning(false);
-      setIsSyncing(false);
-      setSyncProgress(0);
-    }
-  };
-
-  const performSync = async (device: any) => {
-    console.log(`Syncing from device: ${device.name} (${device.id})`);
-    
-    // Connect to device
-    const connected = await BLEFileTransferService.connect(device);
-    if (!connected) {
-      Alert.alert('Connection Failed', 'Could not connect to device. Make sure it is in range and advertising.');
-      return;
-    }
-    
-    console.log('Connected to device, reading file info...');
-    
-    try {
-      // Download and process audio file (handles ADPCM/WAV automatically)
-      const result = await BLEFileTransferService.downloadAndProcessAudioFile((percent) => {
-        setSyncProgress(percent);
-      });
-      
-      if (!result) {
-        Alert.alert('Download Failed', 'Could not download or process audio file from device.');
-        return;
-      }
-      
-      const { audioData, format, fileInfo, audioInfo } = result;
-      
-      console.log(`🎵 Downloaded and processed ${fileInfo.name}:`);
-      console.log(`   - Format: ${format}`);
-      console.log(`   - Original size: ${audioInfo.originalSize} bytes`);
-      console.log(`   - Processed size: ${audioInfo.processedSize} bytes`);
-      console.log(`   - Duration: ${audioInfo.duration.toFixed(1)}s`);
-      if (format === 'ADPCM') {
-        console.log(`   - Compression ratio: ${(audioInfo.originalSize / audioInfo.processedSize * 100).toFixed(1)}%`);
-      }
-      
-      // Validate processed audio file size
-      if (audioData.length < 1000) {
-        Alert.alert('Transfer Incomplete', `Audio file too small: ${audioData.length} bytes. Expected at least 10KB for audio recording.`);
-        console.warn(`Audio transfer may be incomplete: ${audioData.length} bytes`);
-      } else {
-        console.log(`Audio file size looks good: ${(audioData.length / 1024).toFixed(1)} KB`);
-      }
-      
-      // Create organized storage structure
-      const now = new Date();
-      const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const recordingsDir = `${FileSystem.documentDirectory}recordings/`;
-      const monthDir = `${recordingsDir}${yearMonth}/`;
-      
-      // Ensure directories exist
-      const recordingsDirInfo = await FileSystem.getInfoAsync(recordingsDir);
-      if (!recordingsDirInfo.exists) {
-        await FileSystem.makeDirectoryAsync(recordingsDir, { intermediates: true });
-      }
-      
-      const monthDirInfo = await FileSystem.getInfoAsync(monthDir);
-      if (!monthDirInfo.exists) {
-        await FileSystem.makeDirectoryAsync(monthDir, { intermediates: true });
-      }
-      
-      // Generate unique filename
-      const timestamp = now.toISOString().replace(/[:.]/g, '-');
-      const recordingId = uuid.v4() as string;
-      const fileName = fileInfo.name || `XIAO_${timestamp}.wav`;
-      const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const wavPath = `${monthDir}${recordingId}_${sanitizedFileName}`;
-      
-      // Save processed audio file to organized location
-      await FileSystem.writeAsStringAsync(
-        wavPath,
-        Buffer.from(audioData).toString('base64'),
-        { encoding: FileSystem.EncodingType.Base64 }
-      );
-      
-      console.log(`Audio file saved to: ${wavPath}`);
-      
-      // Process through transcription pipeline
-      const formData = new FormData();
-      formData.append('audio', {
-        uri: wavPath,
-        name: sanitizedFileName,
-        type: 'audio/wav'
-      } as any);
-      formData.append('recordingId', recordingId);
-      
-      console.log('Starting transcription...');
-      const transcriptionResult = await APIService.transcribeAudio(formData);
-      
-      // Add to transcripts list with local audio path
-      const newTranscript: Transcript = {
-        id: recordingId,
-        text: transcriptionResult.text || '[No speech detected]',
-        timestamp: new Date(),
-        title: transcriptionResult.aiTitle,
-        summary: transcriptionResult.aiSummary,
-        aiTitle: transcriptionResult.aiTitle,
-        aiSummary: transcriptionResult.aiSummary,
-        durationSeconds: transcriptionResult.durationSeconds,
-        path: transcriptionResult.path,
-        localAudioPath: wavPath, // Store local WAV path
-        remoteAudioUrl: transcriptionResult.audioUrl, // Store remote URL if provided
-        source: 'ble', // Mark as BLE source
-      };
-      
-      setTranscripts(prev => [newTranscript, ...prev]);
-      
-      // Also update filtered transcripts if search is active
-      if (searchQuery) {
-        setFilteredTranscripts(prev => [newTranscript, ...prev]);
-      }
-      
-      Alert.alert('Success', `File synced and transcribed successfully!\n\n${sanitizedFileName}\n${format} format, ${audioData.length} bytes`);
-      
-      // Clear selection after successful sync
-      setSelectedDevice(null);
-      setAvailableDevices([]);
-      
-      // Refresh from backend after a short delay to get complete metadata
-      setTimeout(() => {
-        console.log('Refreshing transcripts from backend after BLE sync...');
-        loadTranscriptsFromBackend();
-      }, 3000);
-      
-    } catch (error) {
-      console.error('Sync failed:', error);
-      Alert.alert('Sync Failed', `Failed to sync from device: ${error.message}`);
-    } finally {
-      setIsSyncing(false);
-      setSyncProgress(0);
-      // Always disconnect when done
-      try {
-        await BLEFileTransferService.disconnect();
-      } catch (e) {
-        console.error('Disconnect error:', e);
-      }
-    }
-  };
-
-  // Auto-scan functions
-  const loadAutoScanPreference = async () => {
-    try {
-      const storedValue = await SecureStorageService.getItemAsync(AUTO_SCAN_STORAGE_KEY);
-      if (storedValue !== null) {
-        const enabled = JSON.parse(storedValue);
-        setAutoScanEnabled(enabled);
-        console.log('Loaded auto-scan preference:', enabled);
-      }
-    } catch (error) {
-      console.error('Failed to load auto-scan preference:', error);
-    }
-  };
-
-  const saveAutoScanPreference = async (enabled: boolean) => {
-    try {
-      await SecureStorageService.setItemAsync(AUTO_SCAN_STORAGE_KEY, JSON.stringify(enabled));
-      console.log('Saved auto-scan preference:', enabled);
-    } catch (error) {
-      console.error('Failed to save auto-scan preference:', error);
-    }
-  };
-
-  const toggleAutoScan = async (enabled: boolean) => {
-    setAutoScanEnabled(enabled);
-    await saveAutoScanPreference(enabled);
-    
-    if (enabled && appState === 'active') {
-      console.log('Auto-scan enabled, starting...');
-      startAutoScan();
-    } else {
-      console.log('Auto-scan disabled, stopping...');
-      stopAutoScan();
-    }
-  };
-
-  const startAutoScan = () => {
-    if (autoScanInterval || isScanning || isSyncing) {
-      console.log('Auto-scan already running or manual operations in progress');
-      return;
-    }
-
-    console.log('Starting auto-scan with', AUTO_SCAN_INTERVAL_MS / 1000, 'second intervals');
-    
-    // Run initial scan immediately
-    performAutoScan();
-    
-    // Set up recurring scans
-    const interval = setInterval(() => {
-      performAutoScan();
-    }, AUTO_SCAN_INTERVAL_MS);
-    
-    setAutoScanInterval(interval);
-  };
-
-  const stopAutoScan = () => {
-    if (autoScanInterval) {
-      console.log('Stopping auto-scan interval');
-      clearInterval(autoScanInterval);
-      setAutoScanInterval(null);
-    }
-    setIsAutoScanning(false);
-  };
-
-  const performAutoScan = async () => {
-    // Don't auto-scan if manual operations are in progress
-    if (isScanning || isSyncing || isRecording) {
-      return;
-    }
-
-    // Don't auto-scan if app is not in foreground
-    if (appState !== 'active') {
-      return;
-    }
-
-    try {
-      setIsAutoScanning(true);
-      setLastAutoScanTime(new Date());
-      
-      // Scan with shorter timeout for battery efficiency
-      const devices = await BLEFileTransferService.scanForDevices(AUTO_SCAN_TIMEOUT_MS);
-      
-      if (devices.length > 0) {
-        // Only log when XIAO devices are found
-        console.log(`🎙️ XIAO Device Found: ${devices[0].name} - Starting automatic sync...`);
-        
-        // Auto-connect to first device found
-        const xiaoDevice = devices[0];
-        setSelectedDevice(xiaoDevice);
-        setAvailableDevices(devices);
-        
-        // Stop auto-scanning and start sync
-        stopAutoScan();
-        setIsAutoScanning(false);
-        
-        // Auto-sync without showing popup
-        performSyncFromAutoScan(xiaoDevice);
-      }
-    } catch (error) {
-      console.error('Auto-scan failed:', error);
-    } finally {
-      setIsAutoScanning(false);
-    }
-  };
-
-  const performSyncFromAutoScan = async (device: any) => {
-    try {
-      setIsSyncing(true);
-      await performSync(device);
-      
-      // Clear device selection after sync
-      setSelectedDevice(null);
-      setAvailableDevices([]);
-      
-      // Resume auto-scanning after successful sync (with delay)
-      if (autoScanEnabled && appState === 'active') {
-        setTimeout(() => {
-          console.log('Resuming auto-scan after successful sync');
-          startAutoScan();
-        }, 10000); // Wait 10 seconds before resuming
-      }
-    } catch (error) {
-      console.error('Auto-sync failed:', error);
-      Alert.alert('Auto-Sync Failed', `Failed to sync: ${error.message}`);
-      
-      // Resume auto-scanning after failed sync
-      if (autoScanEnabled && appState === 'active') {
-        setTimeout(() => {
-          console.log('Resuming auto-scan after failed sync');
-          startAutoScan();
-        }, 5000); // Wait 5 seconds before resuming
-      }
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
   const openReport = async (t: Transcript) => {
     try {
       const dt = t.timestamp;
@@ -1242,24 +798,6 @@ export default function RecordScreen({ route }: any) {
         <View style={styles.recordContainer}>
           {/* Main Recording Section - Horizontal Layout */}
           <View style={styles.recordingRow}>
-            {/* Device Sync Button - Small Circular */}
-            <TouchableOpacity
-              style={styles.miniCircularButton}
-              onPress={autoSyncFromDevice}
-              disabled={isScanning || isSyncing}
-            >
-              <LinearGradient
-                colors={[colors.primary.main, colors.primary.dark]}
-                style={styles.miniButtonGradient}
-              >
-                {isScanning || isSyncing ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Ionicons name="bluetooth" size={12} color="#fff" />
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
-
             {/* Main Record Button */}
             <TouchableOpacity
               style={styles.recordButtonWrapper}
@@ -2188,11 +1726,6 @@ const createStyles = (colors: any) => StyleSheet.create({
     color: colors.text.secondary,
     marginTop: spacing.sm,
   },
-  transcriptText: {
-    ...typography.bodySecondary,
-    color: colors.text.primary,
-    lineHeight: 22,
-  },
   aiTitle: {
     ...typography.h3,
     color: colors.text.primary,
@@ -2201,12 +1734,6 @@ const createStyles = (colors: any) => StyleSheet.create({
   aiSummary: {
     ...typography.bodySecondary,
     color: colors.text.secondary,
-  },
-  transcriptTime: {
-    ...typography.micro,
-    color: colors.text.secondary,
-    marginLeft: spacing.xs,
-    textTransform: 'none',
   },
   emptyState: {
     alignItems: 'center',

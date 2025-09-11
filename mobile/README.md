@@ -1,10 +1,9 @@
-# RAGrecordingMVP - Omi Bluetooth Integration
+# RAGrecordingMVP - Omi-Only Integration
 
-This is an enhanced version of the RAGrecording app that integrates Omi's Bluetooth functionality for seamless audio streaming and transcription. The app now supports three different audio input methods:
+This is an enhanced version of the RAGrecording app that integrates Omi's Bluetooth functionality for seamless audio streaming and transcription. The app now supports two different audio input methods:
 
 1. **Built-in Recording** - Direct microphone recording via the mobile app
-2. **XIAO Hardware** - BLE-based file transfer from XIAO recording devices
-3. **Omi Devices** - Real-time audio streaming from Omi hardware devices
+2. **Omi Devices** - Real-time audio streaming from Omi hardware devices
 
 ## 🚀 Features
 
@@ -13,7 +12,6 @@ This is an enhanced version of the RAGrecording app that integrates Omi's Blueto
 - RAG-in-a-box integration for intelligent responses
 - Chat interface for interacting with transcriptions
 - Webhook monitoring for external hardware recordings
-- Auto-scanning for BLE devices
 - Secure file storage and management
 
 ### New Omi Integration Features
