@@ -28,6 +28,10 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import SecureStorageService from '../services/SecureStorageService';
 import WebhookService from '../services/WebhookService';
+import OmiBluetoothService from '../services/OmiBluetoothService';
+import OmiAudioStreamService from '../services/OmiAudioStreamService';
+import OmiDevicePairing from '../components/OmiDevicePairing';
+import OmiStreamingStatus from '../components/OmiStreamingStatus';
 import { Buffer } from 'buffer';
 import { useTheme, spacing, borderRadius, typography, shadows } from '../theme/colors';
 
@@ -98,6 +102,12 @@ export default function RecordScreen({ route }: any) {
   const [realtimeTranscripts, setRealtimeTranscripts] = useState<any[]>([]);
   const [webhookRecordingDuration, setWebhookRecordingDuration] = useState(0);
 
+  // Omi device integration states
+  const [omiDeviceConnected, setOmiDeviceConnected] = useState(false);
+  const [omiDeviceStreaming, setOmiDeviceStreaming] = useState(false);
+  const [showOmiPairing, setShowOmiPairing] = useState(false);
+  const [omiRealtimeTranscript, setOmiRealtimeTranscript] = useState('');
+
   // Handle deep linking via events
   useEffect(() => {
     const handleDeepLink = (data: { action: string }) => {
@@ -164,6 +174,12 @@ export default function RecordScreen({ route }: any) {
     WebhookService.on('monitoringStarted', () => setIsWebhookMonitoring(true));
     WebhookService.on('monitoringStopped', () => setIsWebhookMonitoring(false));
 
+    // Setup Omi event listeners
+    OmiBluetoothService.on('deviceConnected', handleOmiDeviceConnected);
+    OmiBluetoothService.on('deviceDisconnected', handleOmiDeviceDisconnected);
+    OmiAudioStreamService.on('realtimeTranscription', handleOmiRealtimeTranscription);
+    OmiAudioStreamService.on('finalTranscription', handleOmiFinalTranscription);
+
     loadTranscriptsFromBackend();
 
     // Auto-start webhook monitoring
@@ -173,6 +189,8 @@ export default function RecordScreen({ route }: any) {
       BLEService.removeAllListeners();
       WebhookService.removeAllListeners();
       WebhookService.stopMonitoring();
+      OmiBluetoothService.removeAllListeners();
+      OmiAudioStreamService.removeAllListeners();
       if (intervalId) clearInterval(intervalId);
     };
   }, [currentRecordingId]);
@@ -424,6 +442,71 @@ export default function RecordScreen({ route }: any) {
       }
     } catch (error) {
       console.error('Error processing audio chunk:', error);
+    }
+  };
+
+  // Omi event handlers
+  const handleOmiDeviceConnected = (device: any) => {
+    setOmiDeviceConnected(true);
+    setShowOmiPairing(false);
+    console.log('✅ Omi device connected:', device.name);
+  };
+
+  const handleOmiDeviceDisconnected = (device: any) => {
+    setOmiDeviceConnected(false);
+    setOmiDeviceStreaming(false);
+    setOmiRealtimeTranscript('');
+    console.log('❌ Omi device disconnected:', device.name);
+  };
+
+  const handleOmiRealtimeTranscription = (data: any) => {
+    setOmiRealtimeTranscript(data.text);
+    console.log('📝 Omi realtime transcription:', data.text);
+  };
+
+  const handleOmiFinalTranscription = async (data: any) => {
+    console.log('📝 Omi final transcription:', data.text);
+    
+    // Create a new transcript from Omi audio
+    const omiTranscript: Transcript = {
+      id: data.recordingId || uuid.v4() as string,
+      text: data.text,
+      timestamp: new Date(),
+      title: 'Omi Recording',
+      summary: `Voice recording captured via Omi device (${data.duration?.toFixed(1)}s)`,
+      aiTitle: 'Omi Voice Recording',
+      aiSummary: data.text.length > 100 ? data.text.slice(0, 100) + '...' : data.text,
+      durationSeconds: data.duration,
+      source: 'omi',
+    };
+
+    setTranscripts(prev => [omiTranscript, ...prev]);
+    setOmiRealtimeTranscript('');
+
+    // Also try to get AI-generated title and summary from backend
+    try {
+      const response = await APIService.sendAudioBase64(
+        '', // No audio data needed, just process the text
+        omiTranscript.id,
+        'wav',
+        data.text // Pass transcription text directly
+      );
+      
+      if (response.title || response.summary) {
+        setTranscripts(prev => prev.map(t => 
+          t.id === omiTranscript.id 
+            ? { 
+                ...t, 
+                title: response.title || t.title,
+                summary: response.summary || t.summary,
+                aiTitle: response.title || t.aiTitle,
+                aiSummary: response.summary || t.aiSummary
+              }
+            : t
+        ));
+      }
+    } catch (error) {
+      console.error('Failed to enhance Omi transcription:', error);
     }
   };
 
@@ -1296,6 +1379,52 @@ export default function RecordScreen({ route }: any) {
               )}
             </View>
           )}
+
+        {/* Omi Device Integration Section */}
+        <View style={styles.omiSection}>
+          <View style={styles.omiHeader}>
+            <Text style={styles.sectionTitle}>Omi Device</Text>
+            <TouchableOpacity
+              style={styles.omiToggleButton}
+              onPress={() => setShowOmiPairing(!showOmiPairing)}
+            >
+              <Ionicons 
+                name={showOmiPairing ? 'chevron-up' : 'headset'} 
+                size={18} 
+                color={colors.primary.main} 
+              />
+            </TouchableOpacity>
+          </View>
+
+          {!omiDeviceConnected && showOmiPairing && (
+            <OmiDevicePairing
+              onDeviceConnected={handleOmiDeviceConnected}
+              onDeviceDisconnected={handleOmiDeviceDisconnected}
+              style={styles.omiPairing}
+            />
+          )}
+
+          {omiDeviceConnected && (
+            <OmiStreamingStatus
+              onStartStreaming={() => setOmiDeviceStreaming(true)}
+              onStopStreaming={() => setOmiDeviceStreaming(false)}
+              style={styles.omiStreaming}
+            />
+          )}
+
+          {/* Show realtime transcript from Omi */}
+          {omiDeviceStreaming && omiRealtimeTranscript && (
+            <View style={styles.omiRealtimeSection}>
+              <View style={styles.omiRealtimeHeader}>
+                <Ionicons name="mic" size={16} color={colors.primary.main} />
+                <Text style={styles.omiRealtimeTitle}>Omi Live Transcription</Text>
+                <ActivityIndicator size="small" color={colors.primary.main} />
+              </View>
+              <Text style={styles.omiRealtimeText}>{omiRealtimeTranscript}</Text>
+            </View>
+          )}
+        </View>
+
         <View style={styles.transcriptsSection}>
           <View style={styles.transcriptsHeader}>
             <Text style={styles.sectionTitle}>Recent Transcripts</Text>
@@ -2204,6 +2333,65 @@ const createStyles = (colors: any) => StyleSheet.create({
     justifyContent: 'center',
     width: '100%',
     height: '100%',
+  },
+
+  // Omi Device Styles
+  omiSection: {
+    backgroundColor: `${colors.secondary.main}08`,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginVertical: spacing.sm,
+    marginHorizontal: spacing.lg,
+    borderWidth: 1,
+    borderColor: `${colors.secondary.main}20`,
+  },
+  omiHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  omiToggleButton: {
+    padding: spacing.xs,
+    backgroundColor: `${colors.primary.main}15`,
+    borderRadius: borderRadius.sm,
+  },
+  omiPairing: {
+    marginTop: spacing.sm,
+  },
+  omiStreaming: {
+    marginTop: spacing.sm,
+  },
+  omiRealtimeSection: {
+    backgroundColor: colors.background.card,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginTop: spacing.md,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.secondary.main,
+  },
+  omiRealtimeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  omiRealtimeTitle: {
+    ...typography.body,
+    color: colors.text.primary,
+    fontSize: 14,
+    fontWeight: '500',
+    flex: 1,
+  },
+  omiRealtimeText: {
+    ...typography.body,
+    color: colors.text.primary,
+    fontSize: 14,
+    lineHeight: 20,
+    fontStyle: 'italic',
+    backgroundColor: `${colors.secondary.main}08`,
+    padding: spacing.sm,
+    borderRadius: borderRadius.sm,
   },
 
 }); // End of createStyles function
