@@ -24,9 +24,10 @@ class TranscriptionService {
   async transcribeAudio(audioBuffer: Buffer, format: string = 'wav', speakersExpected: number = 2): Promise<{transcription: string; title?: string; summary?: string}> {
     try {
       console.log(`Attempting transcription of ${audioBuffer.length} bytes in ${format} format`);
+      console.log(`🔑 API Keys available: AssemblyAI=${!!process.env.ASSEMBLY_API_KEY}, OpenAI=${!!process.env.OPENAI_API_KEY}`);
       
-      // Check buffer size
-      if (audioBuffer.length < 1000) {
+      // Check buffer size (lowered threshold to allow small Friend device audio chunks for testing)
+      if (audioBuffer.length < 500) {
         console.warn(`Audio buffer too small: ${audioBuffer.length} bytes`);
         return { 
           transcription: '[Audio file too small for transcription]', 
@@ -39,19 +40,27 @@ class TranscriptionService {
       
       if (process.env.ASSEMBLY_API_KEY) {
         // 1) Non-diarized transcript (fast, stable)
+        console.log('🎤 Using AssemblyAI for transcription...');
         const plainTranscript = await this.transcribeWithAssemblyAIPlain(audioBuffer, format);
+        console.log('🎤 AssemblyAI plain transcript result:', plainTranscript);
         // 2) Text-only classifier (heuristic routing hint, not authoritative)
         const isMulti = await this.classifySingleVsMulti(plainTranscript);
+        console.log('🎤 Multi-speaker classification:', isMulti);
         // 3) Only run diarization if multi-person likely
         if (isMulti) {
           transcription = await this.transcribeWithAssemblyAI(audioBuffer, format, Math.max(2, speakersExpected));
+          console.log('🎤 AssemblyAI diarized transcript result:', transcription);
         } else {
           transcription = plainTranscript;
         }
       } else {
         // Fallback path using Whisper if no AssemblyAI key
+        console.log('🎤 Using Whisper for transcription...');
         transcription = await this.transcribeWithWhisper(audioBuffer, format);
+        console.log('🎤 Whisper transcript result:', transcription);
       }
+      
+      console.log('🎤 Final transcription before title/summary:', transcription);
       
       // LLM title/summary (user-facing)
       const { title, summary } = await this.generateTitleAndSummary(transcription);

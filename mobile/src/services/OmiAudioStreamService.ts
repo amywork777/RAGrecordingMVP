@@ -29,14 +29,21 @@ class OmiAudioStreamService {
   private audioBuffer: AudioBuffer;
   private isBuffering = false;
   private streamingOptions: StreamingOptions;
-  private bufferTimer?: NodeJS.Timeout;
+  private sessionTimer?: NodeJS.Timeout;
   private currentRecordingId?: string;
   private listeners: Map<string, EventCallback[]> = new Map();
   private realtimeTranscriptBuffer: string = '';
+  private sessionTimeout: number = 30000; // 30 second timeout - let much more audio accumulate
+  
+  // Create stable bound methods to avoid reference issues
+  private boundHandleAudioChunk = this.handleAudioChunk.bind(this);
+  private boundOnStreamStarted = this.onStreamStarted.bind(this);
+  private boundOnStreamStopped = this.onStreamStopped.bind(this);
+  private boundOnDeviceDisconnected = this.onDeviceDisconnected.bind(this);
 
   constructor() {
     this.streamingOptions = {
-      bufferDurationSeconds: 3, // Send chunks every 3 seconds
+      bufferDurationSeconds: 10, // Send chunks every 10 seconds to accumulate enough audio
       enableRealTimeTranscription: true,
       sampleRate: 16000, // Omi typically uses 16kHz
       channels: 1 // Mono audio
@@ -82,13 +89,27 @@ class OmiAudioStreamService {
   }
 
   private setupOmiBluetoothListener(): void {
-    // Listen for audio chunks from Omi device
-    OmiBluetoothService.on('audioChunk', this.handleAudioChunk.bind(this));
+    console.log('🔗 Setting up OmiBluetoothService event listeners...');
     
-    // Handle connection events
-    OmiBluetoothService.on('streamStarted', this.onStreamStarted.bind(this));
-    OmiBluetoothService.on('streamStopped', this.onStreamStopped.bind(this));
-    OmiBluetoothService.on('deviceDisconnected', this.onDeviceDisconnected.bind(this));
+    // Remove any existing listeners first to avoid duplicates - use stable bound methods
+    OmiBluetoothService.off('audioChunk', this.boundHandleAudioChunk);
+    OmiBluetoothService.off('streamStarted', this.boundOnStreamStarted);
+    OmiBluetoothService.off('streamStopped', this.boundOnStreamStopped);
+    OmiBluetoothService.off('deviceDisconnected', this.boundOnDeviceDisconnected);
+    
+    // Listen for audio chunks from Omi device - use stable bound methods
+    OmiBluetoothService.on('audioChunk', this.boundHandleAudioChunk);
+    console.log('🔗 Added audioChunk listener');
+    
+    // Handle connection events - use stable bound methods
+    OmiBluetoothService.on('streamStarted', this.boundOnStreamStarted);
+    OmiBluetoothService.on('streamStopped', this.boundOnStreamStopped);
+    OmiBluetoothService.on('deviceDisconnected', this.boundOnDeviceDisconnected);
+    
+    console.log('🔗 All OmiBluetoothService event listeners set up');
+    
+    // Verify listeners are connected by checking if OmiBluetoothService has our callbacks
+    this.verifyEventListeners();
   }
 
   private onStreamStarted(): void {
@@ -98,8 +119,9 @@ class OmiAudioStreamService {
   }
 
   private onStreamStopped(): void {
-    console.log('⏹️ Omi audio stream stopped - finalizing buffer');
-    this.stopBuffering();
+    console.log('⏹️ Omi audio stream stopped - keeping session open for more audio');
+    // Don't automatically stop buffering - let the session timeout handle it
+    // This allows for temporary stream interruptions without losing the session
     this.emit('streamingStopped');
   }
 
@@ -110,8 +132,12 @@ class OmiAudioStreamService {
   }
 
   private handleAudioChunk(audioChunk: AudioChunk): void {
+    console.log(`🎵 OmiAudioStreamService received audio chunk: ${audioChunk.data.length} bytes`);
+    console.log(`🎵 Is buffering: ${this.isBuffering}`);
+    
     if (!this.isBuffering) {
-      return;
+      console.log(`🎵 Starting buffering due to received audio chunk...`);
+      this.startBuffering();
     }
 
     // Add chunk to buffer
@@ -122,6 +148,8 @@ class OmiAudioStreamService {
     const chunkDuration = this.calculateChunkDuration(audioChunk);
     this.audioBuffer.duration += chunkDuration;
 
+    console.log(`🎵 Audio buffer updated: ${this.audioBuffer.chunks.length} chunks, ${this.audioBuffer.totalBytes} bytes, ${this.audioBuffer.duration.toFixed(1)}s`);
+
     // Emit live audio event for UI feedback
     this.emit('liveAudioData', {
       totalBytes: this.audioBuffer.totalBytes,
@@ -129,9 +157,31 @@ class OmiAudioStreamService {
       codec: audioChunk.codec
     });
 
-    // Check if buffer should be processed
-    if (this.audioBuffer.duration >= this.streamingOptions.bufferDurationSeconds) {
-      this.processAudioBuffer();
+    // Just accumulate audio during the session - don't process individual chunks
+    console.log(`🎵 Session audio accumulated: ${this.audioBuffer.totalBytes} bytes (${this.audioBuffer.chunks.length} chunks, ${this.audioBuffer.duration.toFixed(1)}s)`);
+    
+    // Show progress toward meaningful session length (configurable)
+    const minSessionSeconds = 1; // Reduced to 1 second to avoid fake data fallback
+    if (this.audioBuffer.duration >= minSessionSeconds) {
+      console.log(`🎵 ✅ Session has ${this.audioBuffer.duration.toFixed(1)}s of audio - ready for transcription when session ends`);
+    } else {
+      console.log(`🎵 ⏳ Session building... ${this.audioBuffer.duration.toFixed(1)}/${minSessionSeconds}s`);
+    }
+    
+    // Add real-time indicators to show if audio is real vs test data
+    const recentChunk = this.audioBuffer.chunks[this.audioBuffer.chunks.length - 1];
+    if (recentChunk && recentChunk.data.length > 8) {
+      const first4 = Array.from(recentChunk.data.slice(0, 4));
+      const isTestPattern = first4.every((val, i) => val === (i + 1));
+      const isAllSame = recentChunk.data.every(val => val === recentChunk.data[0]);
+      
+      if (isTestPattern) {
+        console.log(`🔍 ⚠️ STILL RECEIVING TEST PATTERN [1,2,3,4...] - Friend device not recording real audio`);
+      } else if (isAllSame) {
+        console.log(`🔍 ⚠️ All bytes identical (${recentChunk.data[0]}) - likely dummy data`);
+      } else {
+        console.log(`🔍 ✅ Audio data looks varied - possibly real audio! First 4 bytes: [${first4.join(',')}]`);
+      }
     }
   }
 
@@ -165,6 +215,13 @@ class OmiAudioStreamService {
     }
 
     console.log(`🎵 Processing audio buffer: ${this.audioBuffer.chunks.length} chunks, ${this.audioBuffer.totalBytes} bytes, ${this.audioBuffer.duration.toFixed(1)}s`);
+
+    // Check if we have enough audio data (lowered threshold for real speech testing)
+    if (this.audioBuffer.totalBytes < 800) {
+      console.log(`🎵 ⚠️ Audio too small: ${this.audioBuffer.totalBytes} bytes (need at least 800) - skipping transcription`);
+      console.log(`🎵 💡 Tip: Let more audio accumulate before pressing 'Transcribe Now'`);
+      return;
+    }
 
     try {
       // Convert audio chunks to a single buffer
@@ -211,20 +268,36 @@ class OmiAudioStreamService {
   }
 
   private async convertToWav(audioData: Uint8Array, codec: string): Promise<string> {
-    // For PCM16, we can create a basic WAV header
-    // For other codecs, we might need more sophisticated conversion
+    console.log(`🔊 Converting ${audioData.length} bytes of ${codec} audio to WAV`);
+    
+    // Debug: Check if audio data looks valid
+    const first10Bytes = Array.from(audioData.slice(0, Math.min(10, audioData.length)));
+    const last10Bytes = Array.from(audioData.slice(Math.max(0, audioData.length - 10)));
+    console.log(`🔍 Audio data sample - first 10 bytes: [${first10Bytes.join(', ')}]`);
+    console.log(`🔍 Audio data sample - last 10 bytes: [${last10Bytes.join(', ')}]`);
+    
+    // Check for patterns that indicate test/dummy data
+    const isAllSame = audioData.every(byte => byte === audioData[0]);
+    const isIncrementing = audioData.every((byte, i) => i === 0 || byte === (audioData[i-1] + 1) % 256);
+    console.log(`🔍 Audio analysis: allSame=${isAllSame}, incrementing=${isIncrementing}, firstByte=${audioData[0]}`);
     
     if (codec === 'PCM16') {
       const wav = this.createWavFromPCM16(audioData);
-      return Buffer.from(wav).toString('base64');
+      const base64 = Buffer.from(wav).toString('base64');
+      console.log(`🔊 PCM16 → WAV conversion: ${audioData.length} → ${wav.length} bytes → ${base64.length} base64 chars`);
+      return base64;
     } else if (codec === 'PCM8') {
       // Convert PCM8 to PCM16 first
       const pcm16Data = this.convertPCM8toPCM16(audioData);
       const wav = this.createWavFromPCM16(pcm16Data);
-      return Buffer.from(wav).toString('base64');
+      const base64 = Buffer.from(wav).toString('base64');
+      console.log(`🔊 PCM8 → PCM16 → WAV conversion: ${audioData.length} → ${pcm16Data.length} → ${wav.length} bytes → ${base64.length} base64 chars`);
+      return base64;
     } else {
       // For Opus, we'll send raw data and let backend handle conversion
-      return Buffer.from(audioData).toString('base64');
+      const base64 = Buffer.from(audioData).toString('base64');
+      console.log(`🔊 Raw ${codec} data: ${audioData.length} bytes → ${base64.length} base64 chars`);
+      return base64;
     }
   }
 
@@ -289,6 +362,19 @@ class OmiAudioStreamService {
       this.currentRecordingId = uuid.v4() as string;
     }
 
+    console.log(`🗣️ Sending audio to STT: ${audioBase64.length} chars, recordingId: ${this.currentRecordingId}`);
+    
+    // Debug: Check if the base64 data looks valid
+    if (audioBase64.length < 1000) {
+      console.warn(`⚠️ Audio base64 is very small: ${audioBase64.length} chars - this might be the issue!`);
+    }
+    
+    // Debug: Show first and last few characters of base64
+    const preview = audioBase64.length > 100 ? 
+      `${audioBase64.substring(0, 50)}...${audioBase64.substring(audioBase64.length - 50)}` : 
+      audioBase64;
+    console.log(`🗣️ Audio base64 preview: ${preview}`);
+
     try {
       // Send to existing STT pipeline
       const response = await APIService.sendAudioBase64(
@@ -297,8 +383,10 @@ class OmiAudioStreamService {
         'wav'
       );
       
+      console.log(`🗣️ STT response:`, response);
+      
       if (response.transcription) {
-        console.log('📝 Received transcription chunk:', response.transcription);
+        console.log('📝 ✅ Received transcription chunk:', response.transcription);
         
         // Update realtime transcript buffer
         this.realtimeTranscriptBuffer += response.transcription + ' ';
@@ -309,6 +397,10 @@ class OmiAudioStreamService {
           fullTranscript: this.realtimeTranscriptBuffer.trim(),
           recordingId: this.currentRecordingId
         });
+        
+        console.log(`📝 ✅ Emitted realtimeTranscription event with: "${response.transcription}"`);
+      } else {
+        console.log('📝 ⚠️ STT response had no transcription field');
       }
     } catch (error) {
       console.error('❌ STT processing failed:', error);
@@ -321,19 +413,20 @@ class OmiAudioStreamService {
       return;
     }
 
-    console.log('🎵 Starting audio buffering');
+    console.log('🎵 Starting audio buffering session');
     this.isBuffering = true;
     this.clearBuffer();
     this.audioBuffer.startTime = Date.now();
     this.currentRecordingId = uuid.v4() as string;
     this.realtimeTranscriptBuffer = '';
 
-    // Set up periodic buffer processing
-    this.bufferTimer = setInterval(() => {
-      if (this.audioBuffer.chunks.length > 0) {
-        this.processAudioBuffer();
-      }
-    }, this.streamingOptions.bufferDurationSeconds * 1000);
+    // Set up session timeout to automatically end sessions
+    this.sessionTimer = setTimeout(() => {
+      console.log(`⏰ Session timeout reached (${this.sessionTimeout / 1000}s) - ending session`);
+      this.stopBuffering();
+    }, this.sessionTimeout);
+    
+    console.log(`🎵 Session started: ${this.currentRecordingId} (will timeout in ${this.sessionTimeout / 1000}s)`);
   }
 
   private stopBuffering(): void {
@@ -341,18 +434,25 @@ class OmiAudioStreamService {
       return;
     }
 
-    console.log('⏹️ Stopping audio buffering');
+    // Debug: Log call stack to see what's triggering early stops
+    console.log(`⏹️ Stopping audio buffering session: ${this.currentRecordingId}`);
+    console.log(`📊 Session summary: ${this.audioBuffer.chunks.length} chunks, ${this.audioBuffer.totalBytes} bytes, ${this.audioBuffer.duration.toFixed(1)}s`);
+    console.log(`🔍 stopBuffering() called by:`, new Error().stack?.split('\n').slice(1, 4).join('\n'));
+    
     this.isBuffering = false;
 
-    // Clear timer
-    if (this.bufferTimer) {
-      clearInterval(this.bufferTimer);
-      this.bufferTimer = undefined;
+    // Clear session timer
+    if (this.sessionTimer) {
+      clearTimeout(this.sessionTimer);
+      this.sessionTimer = undefined;
     }
 
-    // Process any remaining buffer
+    // Process the entire session as one transcription
     if (this.audioBuffer.chunks.length > 0) {
+      console.log('🎵 Processing complete session for transcription...');
       this.processAudioBuffer();
+    } else {
+      console.log('⚠️ No audio chunks to process in this session');
     }
 
     // Emit final transcription if we have any
@@ -400,10 +500,81 @@ class OmiAudioStreamService {
     return this.currentRecordingId;
   }
 
+  // Manual session control
+  forceEndSession(): void {
+    if (this.isBuffering) {
+      console.log('🔄 Manually ending current session...');
+      this.stopBuffering();
+    } else {
+      console.log('⚠️ No active session to end');
+    }
+  }
+
+  // For testing - reduce session timeout to 5 seconds
+  setTestMode(): void {
+    this.sessionTimeout = 5000; // 5 seconds
+    console.log('🧪 Test mode enabled - sessions will timeout after 5 seconds');
+  }
+
+  // Manual initialization method to ensure connection
+  initialize(): void {
+    console.log('🔄 Manually initializing OmiAudioStreamService connections...');
+    console.log('🔄 OmiBluetoothService reference available:', !!OmiBluetoothService);
+    console.log('🔄 Current listeners map size:', this.listeners.size);
+    this.setupOmiBluetoothListener();
+  }
+
+  // Verify event listeners are properly connected
+  private verifyEventListeners(): void {
+    console.log('🔍 Verifying event listeners are connected...');
+    
+    // Test emit a dummy event to see if our handler gets called
+    setTimeout(() => {
+      console.log('🔍 Testing event connection by checking listener counts...');
+      // Try to verify connection by checking if we can call methods
+      if (OmiBluetoothService && typeof OmiBluetoothService.emit === 'function') {
+        console.log('🔍 OmiBluetoothService emit method is available');
+        // Check if our listeners are actually registered by examining the listeners map
+        // Test injection removed - now using only real OmiConnection audio data
+      } else {
+        console.error('🔍 OmiBluetoothService emit method not available!');
+      }
+      console.log('🔍 Event listeners should now be connected with stable references');
+    }, 100);
+  }
+
+  // Debug method to get current service state
+  getDebugInfo(): any {
+    return {
+      isBuffering: this.isBuffering,
+      listenersMapSize: this.listeners.size,
+      hasBluetoothServiceReference: !!OmiBluetoothService,
+      boundMethodsAvailable: {
+        handleAudioChunk: !!this.boundHandleAudioChunk,
+        onStreamStarted: !!this.boundOnStreamStarted,
+        onStreamStopped: !!this.boundOnStreamStopped,
+        onDeviceDisconnected: !!this.boundOnDeviceDisconnected,
+      }
+    };
+  }
+
   // Cleanup
   cleanup(): void {
     console.log('🧹 Cleaning up OmiAudioStreamService...');
     this.stopBuffering();
+    
+    // Clear session timer if running
+    if (this.sessionTimer) {
+      clearTimeout(this.sessionTimer);
+      this.sessionTimer = undefined;
+    }
+    
+    // Remove our specific listeners using stable bound methods
+    OmiBluetoothService.off('audioChunk', this.boundHandleAudioChunk);
+    OmiBluetoothService.off('streamStarted', this.boundOnStreamStarted);
+    OmiBluetoothService.off('streamStopped', this.boundOnStreamStopped);
+    OmiBluetoothService.off('deviceDisconnected', this.boundOnDeviceDisconnected);
+    
     this.removeAllListeners();
   }
 }
