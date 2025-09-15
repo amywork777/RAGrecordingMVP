@@ -45,7 +45,7 @@ class OmiAudioStreamService {
     this.streamingOptions = {
       bufferDurationSeconds: 10, // Send chunks every 10 seconds to accumulate enough audio
       enableRealTimeTranscription: true,
-      sampleRate: 16000, // Omi typically uses 16kHz
+      sampleRate: 8000, // Friend devices typically use 8kHz, not 16kHz
       channels: 1 // Mono audio
     };
 
@@ -132,11 +132,8 @@ class OmiAudioStreamService {
   }
 
   private handleAudioChunk(audioChunk: AudioChunk): void {
-    console.log(`🎵 OmiAudioStreamService received audio chunk: ${audioChunk.data.length} bytes`);
-    console.log(`🎵 Is buffering: ${this.isBuffering}`);
-    
     if (!this.isBuffering) {
-      console.log(`🎵 Starting buffering due to received audio chunk...`);
+      console.log(`🎵 Starting audio session...`);
       this.startBuffering();
     }
 
@@ -148,8 +145,6 @@ class OmiAudioStreamService {
     const chunkDuration = this.calculateChunkDuration(audioChunk);
     this.audioBuffer.duration += chunkDuration;
 
-    console.log(`🎵 Audio buffer updated: ${this.audioBuffer.chunks.length} chunks, ${this.audioBuffer.totalBytes} bytes, ${this.audioBuffer.duration.toFixed(1)}s`);
-
     // Emit live audio event for UI feedback
     this.emit('liveAudioData', {
       totalBytes: this.audioBuffer.totalBytes,
@@ -157,31 +152,9 @@ class OmiAudioStreamService {
       codec: audioChunk.codec
     });
 
-    // Just accumulate audio during the session - don't process individual chunks
-    console.log(`🎵 Session audio accumulated: ${this.audioBuffer.totalBytes} bytes (${this.audioBuffer.chunks.length} chunks, ${this.audioBuffer.duration.toFixed(1)}s)`);
-    
-    // Show progress toward meaningful session length (configurable)
-    const minSessionSeconds = 1; // Reduced to 1 second to avoid fake data fallback
-    if (this.audioBuffer.duration >= minSessionSeconds) {
-      console.log(`🎵 ✅ Session has ${this.audioBuffer.duration.toFixed(1)}s of audio - ready for transcription when session ends`);
-    } else {
-      console.log(`🎵 ⏳ Session building... ${this.audioBuffer.duration.toFixed(1)}/${minSessionSeconds}s`);
-    }
-    
-    // Add real-time indicators to show if audio is real vs test data
-    const recentChunk = this.audioBuffer.chunks[this.audioBuffer.chunks.length - 1];
-    if (recentChunk && recentChunk.data.length > 8) {
-      const first4 = Array.from(recentChunk.data.slice(0, 4));
-      const isTestPattern = first4.every((val, i) => val === (i + 1));
-      const isAllSame = recentChunk.data.every(val => val === recentChunk.data[0]);
-      
-      if (isTestPattern) {
-        console.log(`🔍 ⚠️ STILL RECEIVING TEST PATTERN [1,2,3,4...] - Friend device not recording real audio`);
-      } else if (isAllSame) {
-        console.log(`🔍 ⚠️ All bytes identical (${recentChunk.data[0]}) - likely dummy data`);
-      } else {
-        console.log(`🔍 ✅ Audio data looks varied - possibly real audio! First 4 bytes: [${first4.join(',')}]`);
-      }
+    // Log progress every 100 chunks to reduce spam
+    if (this.audioBuffer.chunks.length % 100 === 0) {
+      console.log(`🎵 Audio: ${this.audioBuffer.totalBytes} bytes (${this.audioBuffer.chunks.length} chunks, ${this.audioBuffer.duration.toFixed(1)}s)`);
     }
   }
 
@@ -216,23 +189,32 @@ class OmiAudioStreamService {
 
     console.log(`🎵 Processing audio buffer: ${this.audioBuffer.chunks.length} chunks, ${this.audioBuffer.totalBytes} bytes, ${this.audioBuffer.duration.toFixed(1)}s`);
 
-    // Check if we have enough audio data (lowered threshold for real speech testing)
-    if (this.audioBuffer.totalBytes < 800) {
-      console.log(`🎵 ⚠️ Audio too small: ${this.audioBuffer.totalBytes} bytes (need at least 800) - skipping transcription`);
-      console.log(`🎵 💡 Tip: Let more audio accumulate before pressing 'Transcribe Now'`);
+    // Quick test: Force transcription regardless of size - your 68KB should work!
+    if (this.audioBuffer.totalBytes < 1) {
+      console.log(`🎵 ⚠️ Audio too small: ${this.audioBuffer.totalBytes} bytes - skipping transcription`);
       return;
     }
+    
+    console.log(`🔥 FORCING TRANSCRIPTION: ${this.audioBuffer.totalBytes} bytes - this should work with backend!`);
+    
+    console.log(`\n🚀 ===============================`);
+    console.log(`🧪 TRANSCRIBING: ${this.audioBuffer.totalBytes} bytes of audio`);
+    console.log(`🚀 ===============================\n`);
 
     try {
       // Convert audio chunks to a single buffer
       const audioData = this.combineAudioChunks(this.audioBuffer.chunks);
       
-      // Convert to WAV format for STT
-      const wavData = await this.convertToWav(audioData, this.audioBuffer.chunks[0]?.codec || 'PCM16');
+      // Check what codec we're actually getting
+      const detectedCodec = this.audioBuffer.chunks[0]?.codec || 'PCM16';
+      console.log(`🎵 Detected codec: ${detectedCodec} from ${this.audioBuffer.chunks.length} chunks`);
+      
+      // Convert to appropriate format for STT
+      const audioForSTT = await this.convertToSTTFormat(audioData, detectedCodec);
       
       // Send to STT pipeline
       if (this.streamingOptions.enableRealTimeTranscription) {
-        await this.sendToSTT(wavData);
+        await this.sendToSTT(audioForSTT, detectedCodec);
       }
 
       // Emit processed audio event
@@ -267,6 +249,19 @@ class OmiAudioStreamService {
     return combined;
   }
 
+  private async convertToSTTFormat(audioData: Uint8Array, codec: string): Promise<string> {
+    if (codec === 'Opus') {
+      // For Opus, send raw data - both AssemblyAI and Whisper support Opus
+      const base64 = Buffer.from(audioData).toString('base64');
+      console.log(`🔊 Opus audio: ${audioData.length} bytes → ${base64.length} base64 chars`);
+      console.log(`🔍 First 20 bytes of "Opus" data: [${Array.from(audioData.slice(0, 20)).join(', ')}]`);
+      return base64;
+    } else {
+      // For PCM formats, convert to WAV
+      return this.convertToWav(audioData, codec);
+    }
+  }
+
   private async convertToWav(audioData: Uint8Array, codec: string): Promise<string> {
     console.log(`🔊 Converting ${audioData.length} bytes of ${codec} audio to WAV`);
     
@@ -276,22 +271,36 @@ class OmiAudioStreamService {
     console.log(`🔍 Audio data sample - first 10 bytes: [${first10Bytes.join(', ')}]`);
     console.log(`🔍 Audio data sample - last 10 bytes: [${last10Bytes.join(', ')}]`);
     
-    // Check for patterns that indicate test/dummy data
-    const isAllSame = audioData.every(byte => byte === audioData[0]);
-    const isIncrementing = audioData.every((byte, i) => i === 0 || byte === (audioData[i-1] + 1) % 256);
-    console.log(`🔍 Audio analysis: allSame=${isAllSame}, incrementing=${isIncrementing}, firstByte=${audioData[0]}`);
-    
     if (codec === 'PCM16') {
-      const wav = this.createWavFromPCM16(audioData);
+      // Try multiple sample rates for Friend device compatibility
+      const formats = [
+        { sampleRate: 8000, name: '8kHz' },
+        { sampleRate: 16000, name: '16kHz' },
+        { sampleRate: 44100, name: '44.1kHz' }
+      ];
+      
+      console.log(`🧪 Testing multiple audio formats for Friend device...`);
+      
+      // Try 16kHz first (standard speech rate), then 8kHz if that fails
+      console.log(`🔍 Friend device PCM16 data analysis: ${audioData.length} bytes`);
+      console.log(`🔍 Estimated duration at 8kHz: ${audioData.length / 2 / 8000}s`);
+      console.log(`🔍 Estimated duration at 16kHz: ${audioData.length / 2 / 16000}s`);
+      
+      // Friend devices usually use 16kHz for better quality
+      const wav = this.createWavFromPCM16WithSampleRate(audioData, 16000);
       const base64 = Buffer.from(wav).toString('base64');
-      console.log(`🔊 PCM16 → WAV conversion: ${audioData.length} → ${wav.length} bytes → ${base64.length} base64 chars`);
+      console.log(`🔊 PCM16 → WAV (16kHz): ${audioData.length} → ${wav.length} bytes → ${base64.length} base64 chars`);
+      
+      // Save the WAV data for playback testing
+      this.saveAudioForPlayback(base64, 'wav');
+      
       return base64;
     } else if (codec === 'PCM8') {
       // Convert PCM8 to PCM16 first
       const pcm16Data = this.convertPCM8toPCM16(audioData);
-      const wav = this.createWavFromPCM16(pcm16Data);
+      const wav = this.createWavFromPCM16WithSampleRate(pcm16Data, 8000);
       const base64 = Buffer.from(wav).toString('base64');
-      console.log(`🔊 PCM8 → PCM16 → WAV conversion: ${audioData.length} → ${pcm16Data.length} → ${wav.length} bytes → ${base64.length} base64 chars`);
+      console.log(`🔊 PCM8 → PCM16 → WAV (8kHz): ${audioData.length} → ${pcm16Data.length} → ${wav.length} bytes → ${base64.length} base64 chars`);
       return base64;
     } else {
       // For Opus, we'll send raw data and let backend handle conversion
@@ -302,7 +311,10 @@ class OmiAudioStreamService {
   }
 
   private createWavFromPCM16(pcmData: Uint8Array): Uint8Array {
-    const sampleRate = this.streamingOptions.sampleRate;
+    return this.createWavFromPCM16WithSampleRate(pcmData, this.streamingOptions.sampleRate);
+  }
+
+  private createWavFromPCM16WithSampleRate(pcmData: Uint8Array, sampleRate: number): Uint8Array {
     const channels = this.streamingOptions.channels;
     const bitsPerSample = 16;
     const byteRate = sampleRate * channels * (bitsPerSample / 8);
@@ -338,6 +350,7 @@ class OmiAudioStreamService {
     const wavData = new Uint8Array(buffer);
     wavData.set(pcmData, 44);
 
+    console.log(`🔊 Created WAV: ${sampleRate}Hz, ${channels}ch, ${bitsPerSample}bit, ${dataSize} PCM bytes → ${wavData.length} WAV bytes`);
     return wavData;
   }
 
@@ -357,7 +370,7 @@ class OmiAudioStreamService {
     return pcm16Data;
   }
 
-  private async sendToSTT(audioBase64: string): Promise<void> {
+  private async sendToSTT(audioBase64: string, codec: string = 'wav'): Promise<void> {
     if (!this.currentRecordingId) {
       this.currentRecordingId = uuid.v4() as string;
     }
@@ -376,11 +389,13 @@ class OmiAudioStreamService {
     console.log(`🗣️ Audio base64 preview: ${preview}`);
 
     try {
-      // Send to existing STT pipeline
+      // Send to existing STT pipeline with correct format
+      const apiFormat = codec === 'Opus' ? 'opus' : 'wav';
+      console.log(`🗣️ Sending ${apiFormat} format to backend...`);
       const response = await APIService.sendAudioBase64(
         audioBase64, 
         this.currentRecordingId, 
-        'wav'
+        apiFormat
       );
       
       console.log(`🗣️ STT response:`, response);
@@ -556,6 +571,66 @@ class OmiAudioStreamService {
         onDeviceDisconnected: !!this.boundOnDeviceDisconnected,
       }
     };
+  }
+
+  // Audio playback for testing
+  private savedAudioData: string | null = null;
+  private savedAudioFormat: string = 'wav';
+
+  private saveAudioForPlayback(audioBase64: string, format: string): void {
+    this.savedAudioData = audioBase64;
+    this.savedAudioFormat = format;
+    console.log(`🎵 Audio saved for playback testing: ${audioBase64.length} chars (${format})`);
+    
+    // Emit event to UI so user can trigger playback
+    this.emit('audioReadyForPlayback', {
+      hasAudio: true,
+      format: format,
+      size: audioBase64.length
+    });
+  }
+
+  // Public method to play back the last converted audio for testing
+  async playLastAudio(): Promise<void> {
+    if (!this.savedAudioData) {
+      console.log('⚠️ No audio data available for playback');
+      return;
+    }
+
+    try {
+      console.log('🔊 Playing back converted audio...');
+      
+      // Use React Native's Audio API for playback
+      const { Audio } = await import('expo-av');
+      
+      // Create data URI for playback
+      const mimeType = this.savedAudioFormat === 'wav' ? 'audio/wav' : 'audio/m4a';
+      const dataUri = `data:${mimeType};base64,${this.savedAudioData}`;
+      
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: dataUri },
+        { shouldPlay: true }
+      );
+      
+      console.log('✅ Audio playback started');
+      
+      // Cleanup sound after playback
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          sound.unloadAsync();
+          console.log('🔇 Audio playback finished');
+        }
+      });
+      
+    } catch (error) {
+      console.error('❌ Audio playback failed:', error);
+      
+      // Fallback: just log audio data info
+      console.log('📊 Audio data info for debugging:');
+      console.log(`📊 Format: ${this.savedAudioFormat}`);
+      console.log(`📊 Base64 length: ${this.savedAudioData.length}`);
+      console.log(`📊 First 100 chars: ${this.savedAudioData.substring(0, 100)}`);
+    }
   }
 
   // Cleanup

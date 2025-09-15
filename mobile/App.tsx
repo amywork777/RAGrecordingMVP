@@ -59,7 +59,7 @@ function MainTabs() {
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: '450',
-          fontFamily: 'General Sans',
+          fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
           marginTop: 4,
         },
       })}

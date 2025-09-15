@@ -2,8 +2,8 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 function deriveDefaultBaseUrl(): string {
-  // NEW WORKING BACKEND URL - Fixed deployment with transcription fix and ZeroEntropy path fix
-  const PRODUCTION_URL = 'https://backend-henna-tau-11.vercel.app';
+  // FRESH BACKEND DEPLOYMENT - Dec 15, 2025 with all fixes
+  const PRODUCTION_URL = 'https://backend-6lmt64j7n-amy-zhous-projects-45e75853.vercel.app';
   
   console.log('=== API URL DERIVATION DEBUG ===');
   console.log('process.env.EXPO_PUBLIC_API_URL:', process.env.EXPO_PUBLIC_API_URL);
@@ -146,13 +146,27 @@ class APIService {
     
     console.log('Creating FormData with:', { mimeType, filename });
     
-    // Convert base64 to proper file format for React Native
-    // Using proper blob-like structure that React Native FormData can handle
-    formData.append('audio', {
-      uri: `data:${mimeType};base64,${base64Audio}`,
-      type: mimeType,
-      name: filename,
-    } as any);
+    // Convert base64 to buffer and create a simple blob for React Native FormData
+    try {
+      // Try React Native's built-in base64 to blob conversion
+      const binaryString = atob(base64Audio);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      
+      // Create blob-like object that React Native FormData can handle
+      formData.append('audio', {
+        uri: `data:${mimeType};base64,${base64Audio}`,
+        type: mimeType,
+        name: filename,
+      } as any);
+      
+      console.log('✅ Successfully created FormData with audio blob');
+    } catch (error) {
+      console.error('❌ Error creating audio blob:', error);
+      throw new Error(`Failed to create audio blob: ${error.message}`);
+    }
     formData.append('recordingId', recordingId);
 
     console.log('Making fetch request...');

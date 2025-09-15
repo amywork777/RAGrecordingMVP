@@ -77,6 +77,9 @@ export default function RecordScreen({ route }: any) {
   const [omiDeviceStreaming, setOmiDeviceStreaming] = useState(false);
   const [showOmiPairing, setShowOmiPairing] = useState(false);
   const [omiRealtimeTranscript, setOmiRealtimeTranscript] = useState('');
+  const [showTranscripts, setShowTranscripts] = useState(true);
+  const [showOmiSection, setShowOmiSection] = useState(true);
+  const [audioAccumulated, setAudioAccumulated] = useState(0); // Track audio bytes
 
   // Handle deep linking via events
   useEffect(() => {
@@ -132,6 +135,20 @@ export default function RecordScreen({ route }: any) {
   }, [isRecording, isBackgroundRecording]);
 
   useEffect(() => {
+    console.log('📱 RecordScreen: Setting up Omi services...');
+    
+    // Force initialization of both services to ensure singletons are connected
+    console.log('📱 OmiAudioStreamService initialized:', !!OmiAudioStreamService);
+    console.log('📱 OmiBluetoothService initialized:', !!OmiBluetoothService);
+    
+    // Manually initialize the audio stream service to ensure connections
+    OmiAudioStreamService.initialize();
+    
+    // Debug service connection states
+    setTimeout(() => {
+      console.log('🐛 OmiAudioStreamService debug info:', OmiAudioStreamService.getDebugInfo());
+    }, 1000);
+    
     // Setup Omi event listeners
     OmiBluetoothService.on('deviceConnected', handleOmiDeviceConnected);
     OmiBluetoothService.on('deviceDisconnected', handleOmiDeviceDisconnected);
@@ -141,8 +158,11 @@ export default function RecordScreen({ route }: any) {
     loadTranscriptsFromBackend();
 
     return () => {
-      OmiBluetoothService.removeAllListeners();
-      OmiAudioStreamService.removeAllListeners();
+      // Don't remove all listeners - just remove our specific ones
+      OmiBluetoothService.off('deviceConnected', handleOmiDeviceConnected);
+      OmiBluetoothService.off('deviceDisconnected', handleOmiDeviceDisconnected);
+      OmiAudioStreamService.off('realtimeTranscription', handleOmiRealtimeTranscription);
+      OmiAudioStreamService.off('finalTranscription', handleOmiFinalTranscription);
       if (intervalId) clearInterval(intervalId);
     };
   }, [currentRecordingId]);
@@ -385,175 +405,7 @@ export default function RecordScreen({ route }: any) {
     }
   };
 
-  // Webhook event handlers
-  const handleWebhookRecordingStarted = (data: any) => {
-    console.log('🎙️ Hardware recording started:', data);
-    setIsHardwareRecording(true);
-    setCurrentConversationId(data.conversationId);
-    setRealtimeTranscripts([]);
-    setWebhookRecordingDuration(0);
-    
-    // Start duration timer
-    const startTime = Date.now();
-    const timer = setInterval(() => {
-      setWebhookRecordingDuration(Math.floor((Date.now() - startTime) / 1000));
-    }, 1000);
-    
-    // Store timer reference for cleanup
-    setTimeout(() => clearInterval(timer), 300000); // Auto-clear after 5 minutes
-  };
 
-  const handleWebhookLiveTranscript = (data: any) => {
-    console.log('📝 Live transcription update:', data.segments.length, 'new segments,', data.totalSegments, 'total');
-    
-    // Add timestamp to each segment for display
-    const segmentsWithTimestamp = data.segments.map((segment: any) => ({
-      ...segment,
-      receivedAt: new Date(),
-      conversationId: data.sessionId || 'webhook-live'
-    }));
-    
-    // Only add new segments that aren't already in the list to prevent duplicates
-    setRealtimeTranscripts(prev => {
-      const newSegments = segmentsWithTimestamp.filter(newSeg => 
-        !prev.some(existingSeg => 
-          existingSeg.text === newSeg.text && 
-          existingSeg.speaker === newSeg.speaker &&
-          Math.abs((existingSeg.receivedAt?.getTime() || 0) - (newSeg.receivedAt?.getTime() || 0)) < 5000 // Within 5 seconds
-        )
-      );
-      
-      if (newSegments.length > 0) {
-        console.log(`Adding ${newSegments.length} new segments (${prev.length} existing)`);
-        // Keep only the last 50 segments to prevent memory bloat
-        return [...prev, ...newSegments].slice(-50);
-      }
-      
-      return prev;
-    });
-  };
-
-  const handleWebhookRecordingEnded = (data: any) => {
-    console.log('⏹️ Hardware recording ended:', data.reason, `Duration: ${data.duration}ms`);
-    setIsHardwareRecording(false);
-    setCurrentConversationId(null);
-    setWebhookRecordingDuration(0);
-    
-    // Convert webhook transcription to regular transcript format and save
-    if (realtimeTranscripts.length > 0) {
-      const webhookText = realtimeTranscripts
-        .map(segment => `[${segment.speaker || 'Speaker'}] ${segment.text}`)
-        .join('\n');
-      
-      const webhookTranscript: Transcript = {
-        id: uuid.v4() as string,
-        text: webhookText,
-        title: `Webhook Recording - ${data.reason}`,
-        summary: `Hardware recording captured ${realtimeTranscripts.length} segments over ${Math.round(data.duration / 1000)}s`,
-        timestamp: new Date(),
-        aiTitle: 'Hardware Transcription',
-        aiSummary: `Captured via webhook monitoring (${data.reason})`
-      };
-      
-      setTranscripts(prev => [webhookTranscript, ...prev]);
-      console.log('💾 Saved webhook transcription with', realtimeTranscripts.length, 'segments');
-      
-      // Clear realtime transcripts after saving
-      setRealtimeTranscripts([]);
-    }
-  };
-
-  const handleConversationCompleted = async (data: any) => {
-    console.log('📋 Conversation completed:', data.conversation.id);
-    
-    // Create a transcript from the conversation
-    const conversation = data.conversation;
-    const fullText = conversation.transcripts.map((t: any) => t.text).join(' ');
-    
-    if (fullText.trim().length > 0) {
-      // Initial transcript with temporary title
-      const tempTranscript: Transcript = {
-        id: conversation.id,
-        text: fullText,
-        title: 'Generating AI title...',
-        summary: data.summary,
-        timestamp: new Date(conversation.startTime),
-        aiTitle: 'Generating AI title...',
-        aiSummary: data.summary,
-        durationSeconds: Math.floor((new Date(conversation.endTime).getTime() - new Date(conversation.startTime).getTime()) / 1000),
-        source: 'hardware',
-      };
-      
-      setTranscripts(prev => [tempTranscript, ...prev]);
-      setFilteredTranscripts(prev => [tempTranscript, ...prev]);
-      
-      // Save to backend and get AI-generated title
-      try {
-        // Convert transcript segments format for webhook API
-        const transcriptSegments = conversation.transcripts.map((t: any, index: number) => ({
-          speaker: `Speaker ${index + 1}`,
-          text: t.text,
-          start: index * 3, // Estimate timing
-          end: (index + 1) * 3,
-          confidence: t.confidence || 0.8,
-          timestamp: t.timestamp || new Date().toISOString()
-        }));
-
-        const response = await fetch('https://backend-henna-tau-11.vercel.app/api/webhook-transcription/store', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            recordingId: conversation.id,
-            sessionId: conversation.id,
-            transcriptSegments,
-            metadata: {
-              source: 'hardware-mobile-app',
-              deviceId: 'mobile-device',
-              startTime: conversation.startTime,
-              endTime: conversation.endTime
-            }
-          })
-        });
-
-        if (response.ok) {
-          const result = await response.json();
-          console.log('✅ Backend returned AI title:', result.title);
-          
-          // Update transcript with AI-generated title
-          const updatedTranscript: Transcript = {
-            ...tempTranscript,
-            title: result.title || 'Hardware Recording',
-            aiTitle: result.title || 'Hardware Recording',
-            summary: result.summary || data.summary,
-            aiSummary: result.summary || data.summary,
-          };
-          
-          // Update the transcript in state
-          setTranscripts(prev => prev.map(t => t.id === conversation.id ? updatedTranscript : t));
-          setFilteredTranscripts(prev => prev.map(t => t.id === conversation.id ? updatedTranscript : t));
-          
-          console.log('Hardware recording saved with AI title:', result.title);
-        } else {
-          console.error('Failed to get AI title from backend:', response.statusText);
-          // Update with fallback title
-          const fallbackTranscript = { ...tempTranscript, title: 'Hardware Recording', aiTitle: 'Hardware Recording' };
-          setTranscripts(prev => prev.map(t => t.id === conversation.id ? fallbackTranscript : t));
-          setFilteredTranscripts(prev => prev.map(t => t.id === conversation.id ? fallbackTranscript : t));
-        }
-      } catch (error) {
-        console.error('Failed to save hardware recording to backend:', error);
-        // Update with fallback title
-        const fallbackTranscript = { ...tempTranscript, title: 'Hardware Recording', aiTitle: 'Hardware Recording' };
-        setTranscripts(prev => prev.map(t => t.id === conversation.id ? fallbackTranscript : t));
-        setFilteredTranscripts(prev => prev.map(t => t.id === conversation.id ? fallbackTranscript : t));
-      }
-    }
-    
-    // Clear realtime transcripts
-    setRealtimeTranscripts([]);
-  };
 
   const toggleRecording = async () => {
     if (isRecording) {
@@ -830,72 +682,6 @@ export default function RecordScreen({ route }: any) {
             {isRecording ? 'Tap to stop' : 'Tap to record'}
           </Text>
         </View>
-        {isWebhookMonitoring && (
-            <View style={styles.realtimeSection}>
-              <TouchableOpacity 
-                style={styles.realtimeHeader} 
-                onPress={() => setIsTranscriptionCollapsed(!isTranscriptionCollapsed)}
-              >
-                <Ionicons name="radio" size={16} color={isHardwareRecording ? colors.text.accent : colors.primary.main} />
-                <Text style={styles.realtimeSectionTitle}>
-                  {isHardwareRecording ? 'Recording' : 'Listening'} 
-                </Text>
-                <View style={styles.statusIndicator}>
-                  <ActivityIndicator size="small" color={colors.primary.main} />
-                  <Text style={styles.statusText}>LIVE</Text>
-                </View>
-                <Ionicons 
-                  name={isTranscriptionCollapsed ? 'chevron-down' : 'chevron-up'} 
-                  size={16} 
-                  color={colors.text.secondary} 
-                  style={{ marginLeft: 8 }}
-                />
-              </TouchableOpacity>
-              
-              {!isTranscriptionCollapsed && (
-                realtimeTranscripts.length > 0 ? (
-                  <ScrollView style={styles.transcriptContainer} nestedScrollEnabled>
-                    {realtimeTranscripts.slice(-10).map((segment, index) => {
-                      // Create a unique key using multiple properties to prevent duplicates
-                      const uniqueKey = `${segment.conversationId || 'webhook'}-${index}-${segment.receivedAt?.getTime() || Date.now()}-${segment.text?.slice(0, 20).replace(/\s/g, '')}`;
-                      return (
-                        <View key={uniqueKey} style={styles.transcriptSegment}>
-                          <View style={styles.transcriptHeader}>
-                            <Text style={styles.transcriptTime}>
-                              {segment.receivedAt ? segment.receivedAt.toLocaleTimeString() : 'Now'}
-                            </Text>
-                            {segment.speaker && (
-                              <Text style={styles.transcriptSpeaker}>{segment.speaker}</Text>
-                            )}
-                            {segment.confidence && (
-                              <Text style={styles.transcriptConfidence}>
-                                {Math.round(segment.confidence * 100)}%
-                              </Text>
-                            )}
-                          </View>
-                          <Text style={styles.transcriptText}>{segment.text}</Text>
-                        </View>
-                      );
-                    })}
-                    {realtimeTranscripts.length > 10 && (
-                      <Text style={styles.realtimeMore}>
-                        +{realtimeTranscripts.length - 10} earlier transcripts...
-                      </Text>
-                    )}
-                  </ScrollView>
-                ) : (
-                  <View style={styles.emptyTranscriptState}>
-                    <Text style={styles.emptyTranscriptText}>
-                      Waiting for transcription data from webhook...
-                    </Text>
-                    <Text style={styles.emptyTranscriptSubtext}>
-                      Send audio to trigger hardware transcription
-                    </Text>
-                  </View>
-                )
-              )}
-            </View>
-          )}
 
         {/* Omi Device Integration Section */}
         <View style={styles.omiSection}>
@@ -903,17 +689,31 @@ export default function RecordScreen({ route }: any) {
             <Text style={styles.sectionTitle}>Omi Device</Text>
             <TouchableOpacity
               style={styles.omiToggleButton}
-              onPress={() => setShowOmiPairing(!showOmiPairing)}
+              onPress={() => setShowOmiSection(!showOmiSection)}
             >
               <Ionicons 
-                name={showOmiPairing ? 'chevron-up' : 'headset'} 
+                name={showOmiSection ? 'chevron-up' : 'chevron-down'} 
                 size={18} 
                 color={colors.primary.main} 
               />
             </TouchableOpacity>
           </View>
 
-          {!omiDeviceConnected && showOmiPairing && (
+          {showOmiSection && (
+            <>
+              {!omiDeviceConnected && (
+                <TouchableOpacity
+                  style={styles.omiPairingToggle}
+                  onPress={() => setShowOmiPairing(!showOmiPairing)}
+                >
+                  <Ionicons name="bluetooth" size={16} color={colors.primary.main} />
+                  <Text style={styles.omiPairingToggleText}>
+                    {showOmiPairing ? 'Hide Pairing' : 'Show Pairing'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              
+              {!omiDeviceConnected && showOmiPairing && (
             <OmiDevicePairing
               onDeviceConnected={handleOmiDeviceConnected}
               onDeviceDisconnected={handleOmiDeviceDisconnected}
@@ -922,11 +722,38 @@ export default function RecordScreen({ route }: any) {
           )}
 
           {omiDeviceConnected && (
-            <OmiStreamingStatus
-              onStartStreaming={() => setOmiDeviceStreaming(true)}
-              onStopStreaming={() => setOmiDeviceStreaming(false)}
-              style={styles.omiStreaming}
-            />
+            <>
+              <OmiStreamingStatus
+                onStartStreaming={() => setOmiDeviceStreaming(true)}
+                onStopStreaming={() => setOmiDeviceStreaming(false)}
+                style={styles.omiStreaming}
+              />
+              
+              {/* Transcribe Now button */}
+              <View style={styles.buttonRow}>
+                <TouchableOpacity
+                  style={styles.transcribeButton}
+                  onPress={() => {
+                    console.log('🎙️ User requested transcription...');
+                    OmiAudioStreamService.forceEndSession();
+                  }}
+                >
+                  <Ionicons name="mic" size={16} color={colors.surface.primary} />
+                  <Text style={styles.transcribeButtonText}>Transcribe Now</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={styles.playButton}
+                  onPress={() => {
+                    console.log('🔊 Playing back converted audio...');
+                    OmiAudioStreamService.playLastAudio();
+                  }}
+                >
+                  <Ionicons name="play" size={16} color={colors.surface.primary} />
+                  <Text style={styles.playButtonText}>Play Audio</Text>
+                </TouchableOpacity>
+              </View>
+            </>
           )}
 
           {/* Show realtime transcript from Omi */}
@@ -940,6 +767,8 @@ export default function RecordScreen({ route }: any) {
               <Text style={styles.omiRealtimeText}>{omiRealtimeTranscript}</Text>
             </View>
           )}
+            </>
+          )}
         </View>
 
         <View style={styles.transcriptsSection}>
@@ -952,11 +781,23 @@ export default function RecordScreen({ route }: any) {
               >
                 <Ionicons name="refresh" size={18} color={colors.primary.main} />
               </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.collapseButton}
+                onPress={() => setShowTranscripts(!showTranscripts)}
+              >
+                <Ionicons 
+                  name={showTranscripts ? 'chevron-up' : 'chevron-down'} 
+                  size={18} 
+                  color={colors.primary.main} 
+                />
+              </TouchableOpacity>
             </View>
           </View>
 
-          {/* Search Bar */}
-          <View style={styles.searchContainer}>
+          {showTranscripts && (
+            <>
+              {/* Search Bar */}
+              <View style={styles.searchContainer}>
             <View style={styles.searchInputWrapper}>
               <Ionicons name="search" size={18} color={colors.text.secondary} />
               <TextInput
@@ -1124,6 +965,8 @@ export default function RecordScreen({ route }: any) {
               ))
             )}
           </ScrollView>
+            </>
+          )}
         </View>
       </LinearGradient>
 
@@ -1466,6 +1309,12 @@ const createStyles = (colors: any) => StyleSheet.create({
     backgroundColor: `${colors.primary.main}20`,
     borderRadius: borderRadius.md,
   },
+  collapseButton: {
+    padding: 8,
+    marginLeft: spacing.xs,
+    backgroundColor: `${colors.primary.main}20`,
+    borderRadius: borderRadius.md,
+  },
   searchContainer: {
     marginTop: spacing.sm,
     marginBottom: spacing.sm,
@@ -1584,52 +1433,6 @@ const createStyles = (colors: any) => StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
     opacity: 0.7,
-  },
-  realtimeTranscripts: {
-    gap: spacing.sm,
-  },
-  webhookTestSection: {
-    backgroundColor: `${colors.accent.warning}08`,
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    marginVertical: spacing.sm,
-    borderWidth: 1,
-    borderColor: `${colors.accent.warning}30`,
-  },
-  webhookTestTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.accent.warning,
-    marginBottom: spacing.sm,
-    textAlign: 'center',
-  },
-  webhookTestButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: spacing.xs,
-  },
-  webhookTestButton: {
-    flex: 1,
-    backgroundColor: `${colors.accent.warning}15`,
-    borderRadius: borderRadius.sm,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: `${colors.accent.warning}30`,
-  },
-  webhookTestButtonText: {
-    fontSize: 10,
-    fontWeight: '500',
-    color: colors.accent.warning,
-    textAlign: 'center',
-  },
-  realtimeSegment: {
-    backgroundColor: colors.background.card,
-    padding: spacing.sm,
-    borderRadius: borderRadius.md,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.primary.main,
   },
   realtimeText: {
     ...typography.body,
@@ -1862,6 +1665,20 @@ const createStyles = (colors: any) => StyleSheet.create({
     backgroundColor: `${colors.primary.main}15`,
     borderRadius: borderRadius.sm,
   },
+  omiPairingToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.sm,
+    marginTop: spacing.xs,
+    backgroundColor: `${colors.primary.main}10`,
+    borderRadius: borderRadius.md,
+  },
+  omiPairingToggleText: {
+    marginLeft: spacing.xs,
+    color: colors.primary.main,
+    fontSize: typography.sizes.sm,
+    fontWeight: '600',
+  },
   omiPairing: {
     marginTop: spacing.sm,
   },
@@ -1898,6 +1715,58 @@ const createStyles = (colors: any) => StyleSheet.create({
     backgroundColor: `${colors.secondary.main}08`,
     padding: spacing.sm,
     borderRadius: borderRadius.sm,
+  },
+
+  // Debug button styles
+  buttonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  transcribeButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary.main,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+  },
+  transcribeButtonText: {
+    ...typography.button,
+    color: colors.surface.primary,
+    marginLeft: spacing.xs,
+  },
+  playButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.accent.info,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+  },
+  playButtonText: {
+    ...typography.button,
+    color: colors.surface.primary,
+    marginLeft: spacing.xs,
+  },
+  debugButton: {
+    backgroundColor: colors.accent.warning,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    marginTop: spacing.sm,
+    alignItems: 'center',
+  },
+  debugButtonText: {
+    ...typography.button,
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
 
 }); // End of createStyles function

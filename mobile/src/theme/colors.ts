@@ -257,4 +257,13 @@ export const typography = {
     fontFamily: 'General Sans',
     letterSpacing: 0,
   },
+  // Font sizes for easy reference
+  sizes: {
+    xs: 11,
+    sm: 13,
+    md: 15,
+    lg: 16,
+    xl: 18,
+    xxl: 22,
+  },
 };

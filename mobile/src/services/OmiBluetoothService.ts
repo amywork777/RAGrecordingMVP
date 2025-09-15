@@ -1,4 +1,6 @@
-import { OmiConnection } from '@omiai/omi-react-native';
+import { BleManager, Device, State, Characteristic } from 'react-native-ble-plx';
+import { Buffer } from 'buffer';
+import { OmiConnection } from 'friend-lite-react-native';
 
 interface OmiDevice {
   id: string;
@@ -17,34 +19,44 @@ interface AudioChunk {
 type EventCallback = (...args: any[]) => void;
 
 class OmiBluetoothService {
-  private omiConnection: OmiConnection | null = null;
+  private bleManager: BleManager;
+  private connectedOmiDevice: Device | null = null;
   private connectedDevice: OmiDevice | null = null;
   private isScanning = false;
   private isStreaming = false;
   private audioBufferCallback?: (audioChunk: AudioChunk) => void;
   private listeners: Map<string, EventCallback[]> = new Map();
   private isInitialized = false;
+  private omiConnection: OmiConnection | null = null;
 
   constructor() {
-    // Don't initialize OmiConnection immediately - wait for first use
+    this.bleManager = new BleManager();
+    this.setupBleManager();
   }
 
   private async initializeConnection(): Promise<boolean> {
     if (this.isInitialized) {
-      return this.omiConnection !== null;
+      return true;
     }
 
     try {
-      console.log('🔧 Initializing Omi connection...');
-      this.omiConnection = new OmiConnection();
-      this.setupEventListeners();
+      console.log('🔧 Initializing BLE manager...');
+      const state = await this.bleManager.state();
+      console.log('📡 BLE State:', state);
+      
+      if (state !== State.PoweredOn) {
+        console.warn('⚠️ Bluetooth is not powered on');
+        this.emit('initializationError', new Error('Bluetooth not enabled'));
+        return false;
+      }
+      
       this.isInitialized = true;
-      console.log('✅ Omi connection initialized successfully');
+      console.log('✅ BLE manager initialized successfully');
       return true;
     } catch (error) {
-      console.error('❌ Failed to initialize Omi connection:', error);
+      console.error('❌ Failed to initialize BLE manager:', error);
       this.emit('initializationError', error);
-      this.isInitialized = true; // Mark as attempted
+      this.isInitialized = true;
       return false;
     }
   }
@@ -69,8 +81,30 @@ class OmiBluetoothService {
 
   emit(event: string, ...args: any[]): void {
     const callbacks = this.listeners.get(event);
+    
+    if (event === 'audioChunk' && (!callbacks || callbacks.length === 0)) {
+      console.log('⚠️ CRITICAL: audioChunk event has NO LISTENERS!');
+      console.log('🔍 Current listeners map keys:', Array.from(this.listeners.keys()));
+      console.log('🔍 All listeners counts:', Array.from(this.listeners.entries()).map(([key, arr]) => `${key}: ${arr.length}`));
+      
+      // Try to re-import and re-initialize the audio service
+      try {
+        console.log('🔧 Attempting emergency re-connection...');
+        // Import here to avoid circular dependency issues
+        const OmiAudioStreamService = require('./OmiAudioStreamService').default;
+        if (OmiAudioStreamService && OmiAudioStreamService.initialize) {
+          console.log('🔧 Re-initializing OmiAudioStreamService...');
+          OmiAudioStreamService.initialize();
+        }
+      } catch (error) {
+        console.error('❌ Emergency re-connection failed:', error);
+      }
+    }
+    
     if (callbacks) {
       callbacks.forEach(callback => callback(...args));
+    } else {
+      console.log(`⚠️ No listeners registered for '${event}' event`);
     }
   }
 
@@ -78,69 +112,23 @@ class OmiBluetoothService {
     this.listeners.clear();
   }
 
-  private setupEventListeners(): void {
-    if (!this.omiConnection) {
-      console.error('❌ Cannot setup event listeners - OmiConnection not initialized');
-      return;
-    }
-
-    // Connection events
-    this.omiConnection.onConnectionStateChanged = (isConnected: boolean, device?: any) => {
-      if (isConnected && device) {
-        this.connectedDevice = {
-          id: device.id,
-          name: device.name || 'Omi Device',
-          connected: true,
-          rssi: device.rssi,
-          battery: device.battery
-        };
-        this.emit('deviceConnected', this.connectedDevice);
-        console.log(`✅ Connected to Omi device: ${this.connectedDevice.name}`);
+  private setupBleManager(): void {
+    this.bleManager.onStateChange((state) => {
+      console.log('📡 BLE State changed:', state);
+      if (state === State.PoweredOn) {
+        this.emit('bleReady');
       } else {
-        if (this.connectedDevice) {
-          this.emit('deviceDisconnected', this.connectedDevice);
-          console.log(`❌ Disconnected from Omi device: ${this.connectedDevice.name}`);
-        }
-        this.connectedDevice = null;
-        this.isStreaming = false;
+        this.emit('bleNotReady', state);
       }
-    };
+    }, true);
+  }
 
-    // Audio data events
-    this.omiConnection.onAudioDataReceived = (audioData: Uint8Array, codec: string) => {
-      if (this.isStreaming && audioData.length > 0) {
-        const audioChunk: AudioChunk = {
-          data: audioData,
-          codec: this.mapCodec(codec),
-          timestamp: Date.now()
-        };
-        
-        // Emit to event listeners
-        this.emit('audioChunk', audioChunk);
-        
-        // Call direct callback if set
-        if (this.audioBufferCallback) {
-          this.audioBufferCallback(audioChunk);
-        }
-      }
-    };
-
-    // Device discovery events
-    this.omiConnection.onDeviceDiscovered = (device: any) => {
-      const omiDevice: OmiDevice = {
-        id: device.id,
-        name: device.name || 'Omi Device',
-        connected: false,
-        rssi: device.rssi
-      };
-      this.emit('deviceDiscovered', omiDevice);
-    };
-
-    // Error handling
-    this.omiConnection.onError = (error: string) => {
-      console.error('❌ Omi Connection Error:', error);
-      this.emit('error', error);
-    };
+  private isOmiDevice(device: Device): boolean {
+    // Check if device name contains 'Omi' or matches Omi device patterns
+    const deviceName = (device.name || device.localName || '').toLowerCase();
+    return deviceName.includes('omi') || 
+           deviceName.includes('friend') || // Friend devices are also Omi-compatible
+           deviceName.startsWith('ble') && deviceName.includes('audio'); // Generic BLE audio devices
   }
 
   private mapCodec(codec: string): 'PCM16' | 'PCM8' | 'Opus' {
@@ -163,51 +151,70 @@ class OmiBluetoothService {
       return [];
     }
 
-    // Initialize connection if needed
     const initialized = await this.initializeConnection();
-    if (!initialized || !this.omiConnection) {
-      console.error('❌ Failed to initialize Omi connection');
-      this.emit('scanError', new Error('Failed to initialize Omi connection'));
+    if (!initialized) {
+      console.error('❌ Failed to initialize BLE manager');
+      this.emit('scanError', new Error('Failed to initialize BLE manager'));
       return [];
     }
 
-    console.log('🔍 Starting Omi device scan...');
+    console.log('🔍 Starting BLE device scan for Omi devices...');
     this.isScanning = true;
+    const discoveredDevices: OmiDevice[] = [];
     
     try {
-      // Use Omi SDK's scan method
-      const devices = await this.omiConnection.scanForDevices(timeoutMs);
-      
-      const omiDevices: OmiDevice[] = devices.map(device => ({
-        id: device.id,
-        name: device.name || 'Omi Device',
-        connected: false,
-        rssi: device.rssi
-      }));
+      this.bleManager.startDeviceScan(null, null, (error, device) => {
+        if (error) {
+          console.error('❌ BLE scan error:', error);
+          return;
+        }
 
-      console.log(`🔍 Found ${omiDevices.length} Omi devices`);
-      this.emit('scanCompleted', omiDevices);
+        if (device && this.isOmiDevice(device)) {
+          const omiDevice: OmiDevice = {
+            id: device.id,
+            name: device.name || device.localName || 'Omi Device',
+            connected: false,
+            rssi: device.rssi || undefined
+          };
+          
+          // Avoid duplicates
+          if (!discoveredDevices.find(d => d.id === omiDevice.id)) {
+            discoveredDevices.push(omiDevice);
+            this.emit('deviceDiscovered', omiDevice);
+            console.log(`🔍 Found Omi device: ${omiDevice.name} (${omiDevice.id})`);
+          }
+        }
+      });
+
+      // Stop scanning after timeout
+      setTimeout(() => {
+        this.bleManager.stopDeviceScan();
+        this.isScanning = false;
+        console.log(`🔍 Scan completed. Found ${discoveredDevices.length} Omi devices`);
+        this.emit('scanCompleted', discoveredDevices);
+      }, timeoutMs);
       
-      return omiDevices;
+      return new Promise((resolve) => {
+        setTimeout(() => resolve(discoveredDevices), timeoutMs);
+      });
     } catch (error) {
-      console.error('❌ Omi device scan failed:', error);
+      console.error('❌ BLE scan failed:', error);
+      this.bleManager.stopDeviceScan();
+      this.isScanning = false;
       this.emit('scanError', error);
       throw error;
-    } finally {
-      this.isScanning = false;
     }
   }
 
   async connectToDevice(deviceId: string): Promise<boolean> {
-    // Initialize connection if needed
     const initialized = await this.initializeConnection();
-    if (!initialized || !this.omiConnection) {
-      console.error('❌ Failed to initialize Omi connection');
-      this.emit('connectionError', new Error('Failed to initialize Omi connection'));
+    if (!initialized) {
+      console.error('❌ Failed to initialize BLE manager');
+      this.emit('connectionError', new Error('Failed to initialize BLE manager'));
       return false;
     }
 
-    if (this.connectedDevice) {
+    if (this.connectedOmiDevice) {
       console.warn('⚠️ Already connected to a device, disconnecting first...');
       await this.disconnect();
     }
@@ -215,17 +222,35 @@ class OmiBluetoothService {
     console.log(`🔗 Connecting to Omi device: ${deviceId}`);
     
     try {
-      const success = await this.omiConnection.connect(deviceId);
+      // First connect with BLE manager for device discovery
+      const device = await this.bleManager.connectToDevice(deviceId);
+      await device.discoverAllServicesAndCharacteristics();
       
-      if (success) {
-        console.log('✅ Successfully connected to Omi device');
-        // Device info will be set via the connection state change callback
-        return true;
-      } else {
-        console.error('❌ Failed to connect to Omi device');
-        this.emit('connectionFailed', deviceId);
-        return false;
+      this.connectedOmiDevice = device;
+      this.connectedDevice = {
+        id: device.id,
+        name: device.name || 'Omi Device',
+        connected: true,
+        rssi: undefined // Will be updated when we read RSSI
+      };
+      
+      console.log(`✅ BLE connected to device: ${this.connectedDevice.name}`);
+      
+      // Now create and connect with OmiConnection
+      if (!this.omiConnection) {
+        this.omiConnection = new OmiConnection();
+        console.log('✅ OmiConnection instance created');
       }
+      
+      // Connect the OmiConnection to this specific device
+      console.log(`🔗 Connecting OmiConnection to device: ${deviceId}`);
+      await this.omiConnection.connect(deviceId, (state: any) => {
+        console.log(`🔗 OmiConnection state changed: ${JSON.stringify(state)}`);
+      });
+      
+      console.log(`✅ Successfully connected to Omi device: ${this.connectedDevice.name}`);
+      this.emit('deviceConnected', this.connectedDevice);
+      return true;
     } catch (error) {
       console.error('❌ Connection error:', error);
       this.emit('connectionError', error);
@@ -234,20 +259,28 @@ class OmiBluetoothService {
   }
 
   async disconnect(): Promise<void> {
-    if (!this.connectedDevice) {
+    if (!this.connectedOmiDevice) {
       console.log('ℹ️ No device connected');
       return;
     }
 
-    console.log(`🔌 Disconnecting from ${this.connectedDevice.name}`);
+    console.log(`🔌 Disconnecting from ${this.connectedDevice?.name}`);
     
     try {
-      // Stop streaming first
       if (this.isStreaming) {
         await this.stopAudioStream();
       }
 
-      await this.omiConnection.disconnect();
+      await this.bleManager.cancelDeviceConnection(this.connectedOmiDevice.id);
+      
+      if (this.connectedDevice) {
+        this.emit('deviceDisconnected', this.connectedDevice);
+      }
+      
+      this.connectedOmiDevice = null;
+      this.connectedDevice = null;
+      this.isStreaming = false;
+      
       console.log('✅ Successfully disconnected');
     } catch (error) {
       console.error('❌ Disconnect error:', error);
@@ -256,7 +289,7 @@ class OmiBluetoothService {
   }
 
   async startAudioStream(): Promise<boolean> {
-    if (!this.connectedDevice) {
+    if (!this.connectedOmiDevice) {
       throw new Error('No Omi device connected');
     }
 
@@ -265,23 +298,51 @@ class OmiBluetoothService {
       return true;
     }
 
-    console.log('🎵 Starting Omi audio stream...');
+    console.log('🎵 Starting BLE audio stream with OmiConnection...');
     
     try {
-      const success = await this.omiConnection.startAudioBytesListener();
-      
-      if (success) {
-        this.isStreaming = true;
-        this.emit('streamStarted');
-        console.log('✅ Audio streaming started');
-        return true;
-      } else {
-        console.error('❌ Failed to start audio streaming');
-        this.emit('streamStartFailed');
-        return false;
+      // Ensure we have an OmiConnection
+      if (!this.omiConnection) {
+        throw new Error('No OmiConnection available - device may not be properly connected');
       }
+      
+      // Start audio bytes listener using the official Friend Lite method
+      console.log('🎵 Starting OmiConnection.startAudioBytesListener...');
+      const subscription = this.omiConnection.startAudioBytesListener(
+        (audioBytes: Uint8Array) => {
+          // Convert to our AudioChunk format
+          const audioChunk: AudioChunk = {
+            data: audioBytes,
+            codec: 'Opus', // Omi devices stream in Opus format as confirmed by testing
+            timestamp: Date.now()
+          };
+          
+          // Emit to our audio stream service (reduced logging)
+          this.emit('audioChunk', audioChunk);
+          
+          // Also call direct callback if set
+          if (this.audioBufferCallback) {
+            this.audioBufferCallback(audioChunk);
+          }
+        },
+        (error: any) => {
+          console.error('❌ OmiConnection audio stream error:', error);
+          this.emit('streamError', error);
+          // Try to maintain connection
+          if (error?.message?.includes('disconnected') || error?.message?.includes('cancelled')) {
+            console.log('🔄 Connection lost, will attempt to maintain audio session...');
+            this.isStreaming = false;
+          }
+        }
+      );
+      
+      this.isStreaming = true;
+      this.emit('streamStarted');
+      console.log('✅ BLE audio streaming started with OmiConnection');
+      return true;
+      
     } catch (error) {
-      console.error('❌ Audio stream start error:', error);
+      console.error('❌ OmiConnection audio stream start error:', error);
       this.emit('streamError', error);
       return false;
     }
@@ -293,13 +354,13 @@ class OmiBluetoothService {
       return;
     }
 
-    console.log('⏹️ Stopping Omi audio stream...');
+    console.log('⏹️ Stopping BLE audio stream...');
     
     try {
-      await this.omiConnection.stopAudioBytesListener();
+      // TODO: Implement BLE characteristic unsubscription
       this.isStreaming = false;
       this.emit('streamStopped');
-      console.log('✅ Audio streaming stopped');
+      console.log('✅ BLE audio streaming stopped');
     } catch (error) {
       console.error('❌ Audio stream stop error:', error);
       this.emit('streamStopError', error);
@@ -313,7 +374,7 @@ class OmiBluetoothService {
 
   // Device and streaming status
   isDeviceConnected(): boolean {
-    return this.connectedDevice !== null && this.connectedDevice.connected;
+    return this.connectedOmiDevice !== null && this.connectedDevice !== null;
   }
 
   isStreamActive(): boolean {
@@ -330,16 +391,16 @@ class OmiBluetoothService {
 
   // Advanced features
   async getBatteryLevel(): Promise<number | null> {
-    if (!this.connectedDevice) {
+    if (!this.connectedOmiDevice) {
       return null;
     }
 
     try {
-      const battery = await this.omiConnection.getBatteryLevel();
-      if (this.connectedDevice) {
-        this.connectedDevice.battery = battery;
-      }
-      return battery;
+      // TODO: Read battery level from BLE characteristic
+      // This would require the battery service UUID (0x180F) and characteristic UUID (0x2A19)
+      console.log('🔋 Getting battery level via BLE...');
+      console.log('📝 Note: Battery level requires specific BLE characteristic access');
+      return null; // Placeholder until BLE implementation
     } catch (error) {
       console.error('❌ Failed to get battery level:', error);
       return null;
@@ -347,12 +408,38 @@ class OmiBluetoothService {
   }
 
   async getDeviceInfo(): Promise<any> {
-    if (!this.connectedDevice) {
+    if (!this.connectedOmiDevice) {
       throw new Error('No device connected');
     }
 
     try {
-      return await this.omiConnection.getDeviceInfo();
+      const services = await this.connectedOmiDevice.services();
+      console.log('🔍 Available services:', services.map(s => ({
+        uuid: s.uuid,
+        isPrimary: s.isPrimary
+      })));
+
+      // Log characteristics for each service
+      for (const service of services) {
+        const characteristics = await service.characteristics();
+        console.log(`📋 Service ${service.uuid} characteristics:`, 
+          characteristics.map(c => ({
+            uuid: c.uuid,
+            isReadable: c.isReadable,
+            isWritableWithResponse: c.isWritableWithResponse,
+            isWritableWithoutResponse: c.isWritableWithoutResponse,
+            isNotifiable: c.isNotifiable,
+            isIndicatable: c.isIndicatable
+          }))
+        );
+      }
+
+      return {
+        id: this.connectedOmiDevice.id,
+        name: this.connectedOmiDevice.name,
+        rssi: await this.connectedOmiDevice.readRSSI(),
+        services: services.map(s => s.uuid)
+      };
     } catch (error) {
       console.error('❌ Failed to get device info:', error);
       throw error;
