@@ -700,4 +700,294 @@ router.get('/transcriptions', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/transcribe/test-conversions - Test multiple conversion methods for Opus data
+router.post('/test-conversions', upload.single('audio'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+
+    console.log(`🧪 Testing conversion methods for audio: ${req.file.originalname}, size: ${req.file.size} bytes, mimetype: ${req.file.mimetype}`);
+
+    const audioBuffer = req.file.buffer;
+    const testResults: any[] = [];
+    const timestamp = Date.now();
+    
+    // Ensure test directory exists
+    const testDir = '/tmp/test-audio';
+    if (!fs.existsSync(testDir)) {
+      fs.mkdirSync(testDir, { recursive: true });
+    }
+
+    // Method 1: Direct Opus processing (current approach)
+    try {
+      console.log('🧪 Method 1: Direct Opus processing...');
+      const base64 = Buffer.from(audioBuffer).toString('base64');
+      
+      // Try OpenAI Whisper with raw Opus
+      let whisperResult = null;
+      try {
+        const testFile = path.join(testDir, `method1_opus_${timestamp}.opus`);
+        fs.writeFileSync(testFile, audioBuffer);
+        console.log(`📁 Saved raw Opus to: ${testFile}`);
+        
+        const result = await TranscriptionService.transcribeAudio(audioBuffer, 'opus', 1);
+        whisperResult = result.transcription || 'No transcription';
+      } catch (whisperError) {
+        whisperResult = `Error: ${(whisperError as Error).message}`;
+      }
+
+      testResults.push({
+        method: 'Direct Opus',
+        description: 'Raw Opus bytes sent directly to Whisper API',
+        fileSize: audioBuffer.length,
+        base64Length: base64.length,
+        whisperResult,
+        status: whisperResult?.includes('Error') ? 'failed' : 'success'
+      });
+    } catch (error) {
+      testResults.push({
+        method: 'Direct Opus',
+        status: 'failed',
+        error: (error as Error).message
+      });
+    }
+
+    // Method 2: Add Opus file header
+    try {
+      console.log('🧪 Method 2: Adding Opus file header...');
+      
+      // Create a minimal Opus file with proper header
+      // OggS header for Opus file
+      const oggHeader = Buffer.from([
+        0x4f, 0x67, 0x67, 0x53, // "OggS"
+        0x00, // version
+        0x02, // header type (beginning of stream)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // granule position
+        0x00, 0x00, 0x00, 0x01, // serial number
+        0x00, 0x00, 0x00, 0x00, // page sequence
+        0x00, 0x00, 0x00, 0x00, // checksum (will be calculated)
+        0x01, // page segments
+        0x13  // segment table (19 bytes for OpusHead)
+      ]);
+      
+      // OpusHead identification header
+      const opusHead = Buffer.from([
+        0x4f, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64, // "OpusHead"
+        0x01, // version
+        0x01, // channel count (mono)
+        0x00, 0x00, // pre-skip (16-bit LE)
+        0x80, 0x3e, 0x00, 0x00, // sample rate 16000 Hz (32-bit LE)  
+        0x00, 0x00, // output gain
+        0x00  // channel mapping family
+      ]);
+      
+      const headerWithOpus = Buffer.concat([oggHeader, opusHead, audioBuffer]);
+      
+      let whisperResult = null;
+      try {
+        const testFile = path.join(testDir, `method2_opus_with_header_${timestamp}.opus`);
+        fs.writeFileSync(testFile, headerWithOpus);
+        console.log(`📁 Saved Opus with header to: ${testFile}`);
+        
+        const result = await TranscriptionService.transcribeAudio(headerWithOpus, 'opus', 1);
+        whisperResult = result.transcription || 'No transcription';
+      } catch (whisperError) {
+        whisperResult = `Error: ${(whisperError as Error).message}`;
+      }
+
+      testResults.push({
+        method: 'Opus with Header',
+        description: 'Added OggS + OpusHead header to raw data',
+        fileSize: headerWithOpus.length,
+        originalSize: audioBuffer.length,
+        headerSize: headerWithOpus.length - audioBuffer.length,
+        whisperResult,
+        status: whisperResult?.includes('Error') ? 'failed' : 'success'
+      });
+    } catch (error) {
+      testResults.push({
+        method: 'Opus with Header',
+        status: 'failed',
+        error: (error as Error).message
+      });
+    }
+
+    // Method 3: Convert to PCM16 WAV assuming it's raw PCM data
+    try {
+      console.log('🧪 Method 3: Treating as raw PCM16 and converting to WAV...');
+      
+      // Create WAV header for 16kHz, 16-bit, mono PCM
+      const sampleRate = 16000;
+      const bitsPerSample = 16;
+      const channels = 1;
+      const byteRate = sampleRate * channels * (bitsPerSample / 8);
+      const blockAlign = channels * (bitsPerSample / 8);
+      const dataSize = audioBuffer.length;
+      const fileSize = 36 + dataSize;
+
+      const wavHeader = Buffer.alloc(44);
+      wavHeader.write('RIFF', 0);
+      wavHeader.writeUInt32LE(fileSize, 4);
+      wavHeader.write('WAVE', 8);
+      wavHeader.write('fmt ', 12);
+      wavHeader.writeUInt32LE(16, 16); // PCM header size
+      wavHeader.writeUInt16LE(1, 20);  // PCM format
+      wavHeader.writeUInt16LE(channels, 22);
+      wavHeader.writeUInt32LE(sampleRate, 24);
+      wavHeader.writeUInt32LE(byteRate, 28);
+      wavHeader.writeUInt16LE(blockAlign, 32);
+      wavHeader.writeUInt16LE(bitsPerSample, 34);
+      wavHeader.write('data', 36);
+      wavHeader.writeUInt32LE(dataSize, 40);
+
+      const wavBuffer = Buffer.concat([wavHeader, audioBuffer]);
+      
+      let whisperResult = null;
+      try {
+        const testFile = path.join(testDir, `method3_pcm16_wav_${timestamp}.wav`);
+        fs.writeFileSync(testFile, wavBuffer);
+        console.log(`📁 Saved PCM16 WAV to: ${testFile}`);
+        
+        const result = await TranscriptionService.transcribeAudio(wavBuffer, 'wav', 1);
+        whisperResult = result.transcription || 'No transcription';
+      } catch (whisperError) {
+        whisperResult = `Error: ${(whisperError as Error).message}`;
+      }
+
+      testResults.push({
+        method: 'Raw PCM16 to WAV',
+        description: 'Treat raw data as PCM16 samples and add WAV header',
+        fileSize: wavBuffer.length,
+        originalSize: audioBuffer.length,
+        headerSize: 44,
+        sampleRate: 16000,
+        whisperResult,
+        status: whisperResult?.includes('Error') ? 'failed' : 'success'
+      });
+    } catch (error) {
+      testResults.push({
+        method: 'Raw PCM16 to WAV',
+        status: 'failed',
+        error: (error as Error).message
+      });
+    }
+
+    // Method 4: Use ffmpeg to convert (if available)
+    try {
+      console.log('🧪 Method 4: FFmpeg conversion...');
+      const { spawn } = require('child_process');
+      
+      // Check if ffmpeg is available
+      const ffmpegAvailable = await new Promise<boolean>((resolve) => {
+        const ffmpeg = spawn('ffmpeg', ['-version'], { stdio: 'pipe' });
+        ffmpeg.on('close', (code) => resolve(code === 0));
+        ffmpeg.on('error', () => resolve(false));
+      });
+
+      if (ffmpegAvailable) {
+        const inputFile = path.join(testDir, `method4_input_${timestamp}.opus`);
+        const outputFile = path.join(testDir, `method4_ffmpeg_output_${timestamp}.wav`);
+        
+        // Write input file
+        fs.writeFileSync(inputFile, audioBuffer);
+        
+        // Convert with ffmpeg
+        const ffmpegResult = await new Promise<string>((resolve, reject) => {
+          const ffmpeg = spawn('ffmpeg', [
+            '-i', inputFile,
+            '-acodec', 'pcm_s16le',
+            '-ar', '16000',
+            '-ac', '1',
+            '-y',
+            outputFile
+          ], { stdio: 'pipe' });
+          
+          let stderr = '';
+          ffmpeg.stderr.on('data', (data) => {
+            stderr += data.toString();
+          });
+          
+          ffmpeg.on('close', (code) => {
+            if (code === 0 && fs.existsSync(outputFile)) {
+              resolve('FFmpeg conversion successful');
+            } else {
+              reject(new Error(`FFmpeg failed with code ${code}: ${stderr}`));
+            }
+          });
+          
+          ffmpeg.on('error', reject);
+        });
+
+        // Test the converted file
+        let whisperResult = null;
+        try {
+          const convertedBuffer = fs.readFileSync(outputFile);
+          const result = await TranscriptionService.transcribeAudio(convertedBuffer, 'wav', 1);
+          whisperResult = result.transcription || 'No transcription';
+        } catch (whisperError) {
+          whisperResult = `Error: ${(whisperError as Error).message}`;
+        }
+
+        testResults.push({
+          method: 'FFmpeg Conversion',
+          description: 'Use FFmpeg to convert Opus to WAV',
+          ffmpegResult,
+          whisperResult,
+          status: whisperResult?.includes('Error') ? 'failed' : 'success'
+        });
+      } else {
+        testResults.push({
+          method: 'FFmpeg Conversion',
+          status: 'skipped',
+          reason: 'FFmpeg not available'
+        });
+      }
+    } catch (error) {
+      testResults.push({
+        method: 'FFmpeg Conversion',
+        status: 'failed',
+        error: (error as Error).message
+      });
+    }
+
+    // Analyze results
+    const successfulMethods = testResults.filter(r => r.status === 'success' && r.whisperResult && !r.whisperResult.includes('Error') && !r.whisperResult.includes('mock'));
+    const bestMethod = successfulMethods.find(r => r.whisperResult && r.whisperResult.length > 10) || successfulMethods[0];
+
+    console.log('🧪 Conversion test results:');
+    testResults.forEach((result, i) => {
+      console.log(`${i + 1}. ${result.method}: ${result.status} - ${result.whisperResult?.substring(0, 100) || result.error || result.reason}`);
+    });
+
+    res.json({
+      testResults,
+      summary: {
+        totalMethods: testResults.length,
+        successful: successfulMethods.length,
+        failed: testResults.filter(r => r.status === 'failed').length,
+        skipped: testResults.filter(r => r.status === 'skipped').length,
+        bestMethod: bestMethod?.method || 'None',
+        recommendation: bestMethod ? 
+          `Use ${bestMethod.method}: ${bestMethod.description}` : 
+          'No method produced valid transcription'
+      },
+      audioInfo: {
+        originalSize: audioBuffer.length,
+        mimetype: req.file.mimetype,
+        filename: req.file.originalname,
+        firstBytes: Array.from(audioBuffer.slice(0, 20)),
+      }
+    });
+
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Test conversions error:', errorMessage);
+    res.status(500).json({ 
+      error: 'Failed to test audio conversions',
+      details: errorMessage
+    });
+  }
+});
+
 export default router;
