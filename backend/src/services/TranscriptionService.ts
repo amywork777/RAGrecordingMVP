@@ -95,7 +95,7 @@ class TranscriptionService {
     const tempDir = './temp';
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
 
-    const fileExt = format === 'wav' ? 'wav' : 'm4a';
+    const fileExt = format === 'wav' ? 'wav' : format === 'opus' ? 'opus' : 'm4a';
     const tempFilePath = path.join(tempDir, `audio_${Date.now()}.${fileExt}`);
     fs.writeFileSync(tempFilePath, audioBuffer);
 
@@ -124,7 +124,7 @@ class TranscriptionService {
         fs.mkdirSync(tempDir);
       }
       
-      const fileExt = format === 'wav' ? 'wav' : 'm4a';
+      const fileExt = format === 'wav' ? 'wav' : format === 'opus' ? 'opus' : 'm4a';
       const tempFilePath = path.join(tempDir, `audio_${Date.now()}.${fileExt}`);
       fs.writeFileSync(tempFilePath, audioBuffer);
 
@@ -218,7 +218,7 @@ class TranscriptionService {
   private async transcribeWithWhisper(audioBuffer: Buffer, format: string = 'wav'): Promise<string> {
     try {
       // Use buffer directly for Vercel serverless (no temp file creation)
-      const fileExt = format === 'wav' ? 'wav' : 'm4a';
+      const fileExt = format === 'wav' ? 'wav' : format === 'opus' ? 'opus' : 'm4a';
       const fileName = `audio_${Date.now()}.${fileExt}`;
       
       // Create a File-like object from buffer for OpenAI API
