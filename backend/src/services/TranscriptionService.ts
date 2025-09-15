@@ -24,6 +24,7 @@ class TranscriptionService {
   async transcribeAudio(audioBuffer: Buffer, format: string = 'wav', speakersExpected: number = 2): Promise<{transcription: string; title?: string; summary?: string}> {
     try {
       console.log(`Attempting transcription of ${audioBuffer.length} bytes in ${format} format`);
+      console.log(`🔍 Audio buffer preview (first 20 bytes): [${Array.from(audioBuffer.slice(0, 20)).join(', ')}]`);
       console.log(`🔑 API Keys available: AssemblyAI=${!!process.env.ASSEMBLY_API_KEY}, OpenAI=${!!process.env.OPENAI_API_KEY}`);
       
       // Check buffer size (lowered threshold to allow small Friend device audio chunks for testing)
