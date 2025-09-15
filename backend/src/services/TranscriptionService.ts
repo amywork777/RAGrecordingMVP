@@ -97,8 +97,16 @@ class TranscriptionService {
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
 
     const fileExt = format === 'wav' ? 'wav' : format === 'opus' ? 'opus' : 'm4a';
-    const tempFilePath = path.join(tempDir, `audio_${Date.now()}.${fileExt}`);
+    const timestamp = new Date().toISOString().replace(/[:]/g, '-');
+    const tempFilePath = path.join(tempDir, `audio_${timestamp}.${fileExt}`);
     fs.writeFileSync(tempFilePath, audioBuffer);
+    
+    // Also save to a persistent location for testing
+    const testDir = './audio_test';
+    if (!fs.existsSync(testDir)) fs.mkdirSync(testDir);
+    const testFilePath = path.join(testDir, `test_audio_${timestamp}.${fileExt}`);
+    fs.writeFileSync(testFilePath, audioBuffer);
+    console.log(`🔍 Test audio saved to: ${testFilePath}`);
 
     try {
       const transcript = await this.assemblyai.transcripts.transcribe({
@@ -126,8 +134,16 @@ class TranscriptionService {
       }
       
       const fileExt = format === 'wav' ? 'wav' : format === 'opus' ? 'opus' : 'm4a';
-      const tempFilePath = path.join(tempDir, `audio_${Date.now()}.${fileExt}`);
+      const timestamp = new Date().toISOString().replace(/[:]/g, '-');
+      const tempFilePath = path.join(tempDir, `audio_${timestamp}.${fileExt}`);
       fs.writeFileSync(tempFilePath, audioBuffer);
+      
+      // Also save to a persistent location for testing
+      const testDir = './audio_test';
+      if (!fs.existsSync(testDir)) fs.mkdirSync(testDir);
+      const testFilePath = path.join(testDir, `test_audio_${timestamp}.${fileExt}`);
+      fs.writeFileSync(testFilePath, audioBuffer);
+      console.log(`🔍 Test audio saved to: ${testFilePath}`);
 
       // Only set speakers_expected when caller provided a hint; otherwise let AAI infer.
       const requestBody: any = {
