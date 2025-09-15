@@ -36,6 +36,8 @@ class TranscriptionService {
         };
       }
       
+      // Force Vercel deployment refresh - Dec 15, 2025
+      
       let transcription: string;
       
       if (process.env.ASSEMBLY_API_KEY) {
