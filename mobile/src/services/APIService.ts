@@ -2,8 +2,8 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 function deriveDefaultBaseUrl(): string {
-  // FRESH BACKEND DEPLOYMENT - Dec 15, 2025 with all fixes
-  const PRODUCTION_URL = 'https://backend-6lmt64j7n-amy-zhous-projects-45e75853.vercel.app';
+  // LATEST BACKEND DEPLOYMENT - With debug-audio endpoint for Omi analysis
+  const PRODUCTION_URL = 'https://backend-1sil8io8m-amy-zhous-projects-45e75853.vercel.app';
   
   console.log('=== API URL DERIVATION DEBUG ===');
   console.log('process.env.EXPO_PUBLIC_API_URL:', process.env.EXPO_PUBLIC_API_URL);
@@ -66,7 +66,7 @@ console.log('__DEV__:', __DEV__);
 
 // Fallback URL helper
 async function fetchWithFallback(url: string, options: RequestInit): Promise<Response> {
-  const PRODUCTION_URL = 'https://backend-henna-tau-11.vercel.app';
+  const PRODUCTION_URL = 'https://backend-2fm8lqogk-amy-zhous-projects-45e75853.vercel.app';
   const LOCAL_URL = 'http://localhost:3000';
   
   try {
@@ -141,8 +141,8 @@ class APIService {
     const formData = new FormData();
     
     // Create a file-like object from base64
-    const mimeType = format === 'wav' ? 'audio/wav' : 'audio/m4a';
-    const filename = format === 'wav' ? 'recording.wav' : 'recording.m4a';
+    const mimeType = format === 'wav' ? 'audio/wav' : format === 'opus' ? 'audio/opus' : 'audio/m4a';
+    const filename = format === 'wav' ? 'recording.wav' : format === 'opus' ? 'recording.opus' : 'recording.m4a';
     
     console.log('Creating FormData with:', { mimeType, filename });
     
@@ -515,6 +515,65 @@ class APIService {
   private generateContextualResponse(question: string, transcriptText: string, transcriptionId: string | null): string {
     // This is now just a wrapper to the conversational fallback for consistency
     return this.generateConversationalFallback(question, transcriptText);
+  }
+
+  async testAudioConversions(base64Audio: string, recordingId: string, format: string = 'opus'): Promise<any> {
+    console.log('APIService: Testing audio conversion methods');
+    console.log('Recording ID:', recordingId);
+    console.log('Format:', format);
+    console.log('Base64 length:', base64Audio.length);
+    console.log('API URL:', `${API_BASE_URL}/api/transcribe/test-conversions`);
+    
+    const formData = new FormData();
+    
+    // Create a file-like object from base64
+    const mimeType = format === 'wav' ? 'audio/wav' : format === 'opus' ? 'audio/opus' : 'audio/m4a';
+    const filename = format === 'wav' ? 'recording.wav' : format === 'opus' ? 'recording.opus' : 'recording.m4a';
+    
+    console.log('Creating FormData with:', { mimeType, filename });
+    
+    // Convert base64 to buffer and create a simple blob for React Native FormData
+    try {
+      // Try React Native's built-in base64 to blob conversion
+      const binaryString = atob(base64Audio);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      
+      // Create blob-like object that React Native FormData can handle
+      formData.append('audio', {
+        uri: `data:${mimeType};base64,${base64Audio}`,
+        type: mimeType,
+        name: filename,
+      } as any);
+      
+      console.log('✅ Successfully created FormData with audio blob');
+    } catch (error) {
+      console.error('❌ Error creating audio blob:', error);
+      throw new Error(`Failed to create audio blob: ${error.message}`);
+    }
+
+    console.log('Making fetch request to test conversions endpoint...');
+    const response = await fetchWithFallback(`${API_BASE_URL}/api/transcribe/test-conversions`, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        // Let React Native set Content-Type automatically for FormData
+      },
+    });
+
+    console.log('Test conversions response status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Test conversions failed:', errorText);
+      throw new Error(`Test conversions failed: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    const jsonResponse = await response.json();
+    console.log('Test conversions response:', jsonResponse);
+    return jsonResponse;
   }
 
 }

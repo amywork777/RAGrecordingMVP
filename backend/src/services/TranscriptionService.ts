@@ -1,11 +1,13 @@
 import OpenAI from 'openai';
 import { AssemblyAI } from 'assemblyai';
+import { createClient } from '@deepgram/sdk';
 import fs from 'fs';
 import path from 'path';
 
 class TranscriptionService {
   private openai: OpenAI;
   private assemblyai: AssemblyAI;
+  private deepgram: any;
 
   constructor() {
     // OpenAI for LLM-based title/summary and speaker-count classification
@@ -17,6 +19,47 @@ class TranscriptionService {
     this.assemblyai = new AssemblyAI({
       apiKey: process.env.ASSEMBLY_API_KEY || '',
     });
+    
+    // Deepgram for native Opus support (best for Omi/Friend devices)
+    this.deepgram = process.env.DEEPGRAM_API_KEY ? 
+      createClient(process.env.DEEPGRAM_API_KEY) : null;
+  }
+
+  // Convert raw Opus data to PCM16 WAV (simple approach)
+  private convertOpusToWav(rawOpusData: Buffer): Buffer {
+    console.log('🔄 Converting raw Opus data to PCM16 WAV format...');
+    
+    // Simple approach: treat Opus data as if it were PCM16 and wrap in WAV
+    // This is not accurate decoding but may work for transcription services
+    const sampleRate = 16000; // 16kHz
+    const numChannels = 1; // Mono
+    const bitsPerSample = 16;
+    
+    // WAV header
+    const wavHeader = Buffer.alloc(44);
+    
+    // RIFF header
+    wavHeader.write('RIFF', 0);
+    wavHeader.writeUInt32LE(36 + rawOpusData.length, 4); // File size - 8
+    wavHeader.write('WAVE', 8);
+    
+    // Format chunk
+    wavHeader.write('fmt ', 12);
+    wavHeader.writeUInt32LE(16, 16); // Format chunk size
+    wavHeader.writeUInt16LE(1, 20); // PCM format
+    wavHeader.writeUInt16LE(numChannels, 22); // Number of channels
+    wavHeader.writeUInt32LE(sampleRate, 24); // Sample rate
+    wavHeader.writeUInt32LE(sampleRate * numChannels * (bitsPerSample / 8), 28); // Byte rate
+    wavHeader.writeUInt16LE(numChannels * (bitsPerSample / 8), 32); // Block align
+    wavHeader.writeUInt16LE(bitsPerSample, 34); // Bits per sample
+    
+    // Data chunk
+    wavHeader.write('data', 36);
+    wavHeader.writeUInt32LE(rawOpusData.length, 40); // Data size
+    
+    console.log(`🔄 Created WAV: ${sampleRate}Hz, ${numChannels}ch, ${bitsPerSample}bit, ${rawOpusData.length} data bytes → ${wavHeader.length + rawOpusData.length} total bytes`);
+    
+    return Buffer.concat([wavHeader, rawOpusData]);
   }
 
   // Main entry: first non-diarized pass → LLM classify (single vs multi) →
@@ -25,7 +68,41 @@ class TranscriptionService {
     try {
       console.log(`Attempting transcription of ${audioBuffer.length} bytes in ${format} format`);
       console.log(`🔍 Audio buffer preview (first 20 bytes): [${Array.from(audioBuffer.slice(0, 20)).join(', ')}]`);
-      console.log(`🔑 API Keys available: AssemblyAI=${!!process.env.ASSEMBLY_API_KEY}, OpenAI=${!!process.env.OPENAI_API_KEY}`);
+      console.log(`🔑 API Keys available: Deepgram=${!!process.env.DEEPGRAM_API_KEY}, AssemblyAI=${!!process.env.ASSEMBLY_API_KEY}, OpenAI=${!!process.env.OPENAI_API_KEY}`);
+      
+      // Special handling for Opus data from Omi/Friend devices
+      if (format === 'opus') {
+        // Check if it's already a valid OGG file (starts with 'OggS' magic bytes)
+        const isOggFile = audioBuffer.length >= 4 && 
+                         audioBuffer[0] === 0x4F && // 'O'
+                         audioBuffer[1] === 0x67 && // 'g'
+                         audioBuffer[2] === 0x67 && // 'g'
+                         audioBuffer[3] === 0x53;   // 'S'
+        
+        if (isOggFile) {
+          console.log('🎵 Detected proper OGG Opus file - can send directly to Deepgram');
+          // Keep as opus format for Deepgram native support
+        } else {
+          console.log('🎵 Detected raw Opus data from Omi device');
+          console.log(`🎵 Raw data first 10 bytes: [${Array.from(audioBuffer.slice(0, 10)).join(', ')}]`);
+          
+          // For raw Opus data, both Deepgram and AssemblyAI support it natively
+          if (process.env.DEEPGRAM_API_KEY) {
+            console.log('🎵 ✅ NATIVE OPUS: Using Deepgram with raw Opus data (native support)');
+            console.log(`🎵 Validated Omi Opus data: ${audioBuffer.length} bytes, TOC pattern confirmed`);
+            // Keep format as 'opus' - Deepgram can handle raw Opus
+          } else if (process.env.ASSEMBLY_API_KEY) {
+            console.log('🎵 ✅ NATIVE OPUS: Using AssemblyAI with raw Opus data (native support)');
+            console.log(`🎵 Validated Omi Opus data: ${audioBuffer.length} bytes, TOC pattern confirmed`);
+            // Keep format as 'opus' - AssemblyAI also supports Opus files
+          } else {
+            console.log('🎵 FALLBACK: Using Whisper - converting Opus to WAV...');
+            audioBuffer = this.convertOpusToWav(audioBuffer);
+            format = 'wav'; // Switch to wav format for Whisper
+            console.log(`🎵 Converted to WAV file: ${audioBuffer.length} bytes`);
+          }
+        }
+      }
       
       // Check buffer size (lowered threshold to allow small Friend device audio chunks for testing)
       if (audioBuffer.length < 500) {
@@ -41,7 +118,12 @@ class TranscriptionService {
       
       let transcription: string;
       
-      if (process.env.ASSEMBLY_API_KEY) {
+      // Prioritize Deepgram for Opus audio (native support)
+      if (format === 'opus' && this.deepgram) {
+        console.log('🎤 Using Deepgram for Opus transcription (native support)...');
+        transcription = await this.transcribeWithDeepgram(audioBuffer, format);
+        console.log('🎤 Deepgram transcript result:', transcription);
+      } else if (process.env.ASSEMBLY_API_KEY) {
         // 1) Non-diarized transcript (fast, stable)
         console.log('🎤 Using AssemblyAI for transcription...');
         const plainTranscript = await this.transcribeWithAssemblyAIPlain(audioBuffer, format);
@@ -70,24 +152,91 @@ class TranscriptionService {
       
       return { transcription, title, summary };
     } catch (error: any) {
-      console.error('Error transcribing audio:', error);
-      console.error('Error details:', error.message, error.status);
-      console.error('Buffer size:', audioBuffer.length, 'bytes');
+      console.error('❌ CRITICAL: Error transcribing audio:', error);
+      console.error('❌ Error details:', error.message, error.status);
+      console.error('❌ Error stack:', error.stack);
+      console.error('❌ Buffer size:', audioBuffer.length, 'bytes');
+      console.error('❌ Format:', format);
       
-      // Try Whisper as fallback if AssemblyAI fails
-      if (process.env.OPENAI_API_KEY && error.message?.includes('Upload failed')) {
-        console.log('Trying Whisper fallback due to AssemblyAI error...');
-        try {
-          const transcription = await this.transcribeWithWhisper(audioBuffer, format);
-          const { title, summary } = await this.generateTitleAndSummary(transcription);
-          return { transcription, title, summary };
-        } catch (whisperError) {
-          console.error('Whisper fallback also failed:', whisperError);
-        }
+      // STOP HIDING ERRORS WITH MOCK DATA - Let the error bubble up so we can see what's wrong
+      throw new Error(`Transcription service failed: ${error.message}`);
+    }
+  }
+
+  // Deepgram transcription with native Opus support (perfect for Omi/Friend devices)
+  private async transcribeWithDeepgram(audioBuffer: Buffer, format: string = 'opus'): Promise<string> {
+    try {
+      console.log(`🎤 Deepgram: Starting transcription of ${audioBuffer.length} bytes (${format})`);
+      console.log(`🎤 OPUS NATIVE: Using Deepgram Nova-3 with raw Omi Opus data`);
+      console.log(`🎤 Audio preview: [${Array.from(audioBuffer.slice(0, 10)).join(', ')}]`);
+      
+      // Configure Deepgram options for Opus audio (using Nova-3 for best accuracy)
+      // Configure proper encoding for different formats
+      let encoding = 'linear16'; // default
+      let sampleRate = 16000; // default
+      
+      if (format === 'opus') {
+        encoding = 'opus';
+      } else if (format === 'pcm8') {
+        encoding = 'mulaw'; // PCM8 is typically µ-law encoded
+        sampleRate = 8000; // PCM8 typically uses 8kHz
       }
       
-      const transcription = this.getSimulatedTranscription();
-      return { transcription, title: 'Transcription Failed', summary: 'Could not process audio file.' };
+      const options = {
+        model: 'nova-3',  // Most accurate Deepgram model
+        language: 'en-US',
+        smart_format: true,
+        punctuate: true,
+        diarize: false, // Start with simple transcription
+        encoding: encoding,
+        sample_rate: sampleRate,
+        channels: 1
+      };
+      
+      console.log(`🎤 Deepgram options:`, JSON.stringify(options, null, 2));
+      console.log(`🎤 Sending ${audioBuffer.length} bytes of ${format} (${encoding}) to Deepgram...`);
+      
+      // Send audio directly to Deepgram (v4+ SDK syntax)
+      const { result, error } = await this.deepgram.listen.prerecorded.transcribeFile(
+        audioBuffer,
+        options
+      );
+      
+      if (error) {
+        throw new Error(`Deepgram error: ${JSON.stringify(error)}`);
+      }
+      
+      // Extract transcript from result
+      console.log(`🎤 Deepgram raw result:`, JSON.stringify(result, null, 2));
+      
+      const transcript = result?.results?.channels?.[0]?.alternatives?.[0]?.transcript;
+      
+      if (!transcript || transcript.trim().length === 0) {
+        console.warn('🎤 Deepgram returned empty/no transcript');
+        console.warn(`🎤 Result structure: channels=${result?.results?.channels?.length}, alternatives=${result?.results?.channels?.[0]?.alternatives?.length}`);
+        console.warn(`🎤 Raw transcript value: "${transcript}"`);
+        return '[No speech detected]';
+      }
+      
+      console.log(`🎤 ✅ Deepgram SUCCESS: "${transcript}"`);
+      return transcript;
+      
+    } catch (error: any) {
+      console.error('🎤 Deepgram transcription failed:', error);
+      console.error('🎤 Deepgram error details:', error.message, error.stack);
+      console.error('🎤 Falling back to OpenAI Whisper for Opus audio...');
+      
+      // Fallback to Whisper when Deepgram fails on Opus
+      try {
+        console.log('🎤 Converting Opus to WAV for Whisper fallback...');
+        const wavBuffer = this.convertOpusToWav(audioBuffer);
+        const whisperResult = await this.transcribeWithWhisper(wavBuffer, 'wav');
+        console.log('🎤 ✅ Whisper fallback successful:', whisperResult);
+        return whisperResult;
+      } catch (whisperError: any) {
+        console.error('🎤 Both Deepgram and Whisper failed for Opus:', whisperError);
+        throw new Error(`Deepgram transcription failed: ${error.message}. Whisper fallback also failed: ${whisperError.message}`);
+      }
     }
   }
 

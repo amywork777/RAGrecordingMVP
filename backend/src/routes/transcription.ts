@@ -29,7 +29,11 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
     
     // Detect audio format from mimetype or filename
     let format = 'wav'; // default
-    if (req.file.mimetype.includes('m4a') || req.file.originalname?.includes('.m4a')) {
+    if (req.file.mimetype.includes('opus') || req.file.originalname?.includes('.opus')) {
+      format = 'opus';
+    } else if (req.file.mimetype.includes('pcm8') || req.file.originalname?.includes('pcm8')) {
+      format = 'pcm8';
+    } else if (req.file.mimetype.includes('m4a') || req.file.originalname?.includes('.m4a')) {
       format = 'm4a';
     } else if (req.file.mimetype.includes('wav') || req.file.originalname?.includes('.wav')) {
       format = 'wav';
@@ -701,6 +705,63 @@ router.get('/transcriptions', async (req: Request, res: Response) => {
 });
 
 // POST /api/transcribe/test-conversions - Test multiple conversion methods for Opus data
+// POST /api/debug-audio - Save raw audio to disk for analysis
+router.post('/debug-audio', upload.single('audio'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+
+    const timestamp = Date.now();
+    const filename = `omi_debug_${timestamp}.opus`;
+    const filepath = `/tmp/${filename}`;
+    
+    // Save raw audio bytes to disk
+    const fs = require('fs');
+    fs.writeFileSync(filepath, req.file.buffer);
+    
+    // Analyze first 50 bytes
+    const firstBytes = Array.from(req.file.buffer.slice(0, 50));
+    
+    // Check for OGG header
+    const isOgg = req.file.buffer.length >= 4 && 
+                  req.file.buffer[0] === 0x4F && // 'O'
+                  req.file.buffer[1] === 0x67 && // 'g' 
+                  req.file.buffer[2] === 0x67 && // 'g'
+                  req.file.buffer[3] === 0x53;   // 'S'
+    
+    console.log(`🔍 Audio debug saved: ${filepath}`);
+    console.log(`🔍 Size: ${req.file.buffer.length} bytes`);
+    console.log(`🔍 First 50 bytes: [${firstBytes.join(', ')}]`);
+    console.log(`🔍 Is OGG format: ${isOgg}`);
+    console.log(`🔍 MimeType: ${req.file.mimetype}`);
+    console.log(`🔍 Original name: ${req.file.originalname}`);
+
+    res.json({
+      saved: filepath,
+      filename,
+      size: req.file.buffer.length,
+      firstBytes,
+      isOggFormat: isOgg,
+      mimeType: req.file.mimetype,
+      originalName: req.file.originalname,
+      analysis: {
+        likelyFormat: isOgg ? 'OGG-containerized Opus' : 'Raw Opus packets',
+        recommendation: isOgg ? 
+          'Should work with Deepgram directly' : 
+          'Needs OGG wrapper or different conversion approach'
+      }
+    });
+
+  } catch (error: unknown) {
+    console.error('Debug audio error:', error);
+    res.status(500).json({ 
+      error: 'Failed to debug audio',
+      details: (error as Error).message
+    });
+  }
+});
+
 router.post('/test-conversions', upload.single('audio'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
@@ -881,7 +942,7 @@ router.post('/test-conversions', upload.single('audio'), async (req: Request, re
       // Check if ffmpeg is available
       const ffmpegAvailable = await new Promise<boolean>((resolve) => {
         const ffmpeg = spawn('ffmpeg', ['-version'], { stdio: 'pipe' });
-        ffmpeg.on('close', (code) => resolve(code === 0));
+        ffmpeg.on('close', (code: number | null) => resolve(code === 0));
         ffmpeg.on('error', () => resolve(false));
       });
 
@@ -904,11 +965,11 @@ router.post('/test-conversions', upload.single('audio'), async (req: Request, re
           ], { stdio: 'pipe' });
           
           let stderr = '';
-          ffmpeg.stderr.on('data', (data) => {
+          ffmpeg.stderr.on('data', (data: Buffer) => {
             stderr += data.toString();
           });
           
-          ffmpeg.on('close', (code) => {
+          ffmpeg.on('close', (code: number | null) => {
             if (code === 0 && fs.existsSync(outputFile)) {
               resolve('FFmpeg conversion successful');
             } else {

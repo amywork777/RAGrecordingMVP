@@ -145,6 +145,45 @@ class OmiBluetoothService {
     }
   }
 
+  private detectAudioCodec(audioData: Uint8Array): 'PCM16' | 'PCM8' | 'Opus' {
+    // Based on GitHub issue #88, CK1 devices report PCM8 format
+    // Force PCM8 for all Omi-related devices since that's what the logs show
+    const deviceName = this.connectedDevice?.name?.toLowerCase() || '';
+    const deviceId = this.connectedDevice?.id?.toLowerCase() || '';
+    
+    // Device-specific codec detection - be more permissive
+    if (deviceName.includes('ck1') || deviceName.includes('friend') || 
+        deviceName.includes('omi') || deviceName.includes('based') ||
+        deviceId.includes('ck1') || deviceId.includes('friend') ||
+        // Force PCM8 if this is any Omi device connection
+        this.connectedOmiDevice) {
+      return 'PCM8';
+    }
+    
+    // Data pattern analysis for codec detection
+    if (audioData.length > 0) {
+      // Check for OGG Opus header (starts with 'OggS')
+      if (audioData.length >= 4 && 
+          audioData[0] === 0x4F && audioData[1] === 0x67 && 
+          audioData[2] === 0x67 && audioData[3] === 0x53) {
+        console.log('🔍 Detected OGG Opus header - using Opus codec');
+        return 'Opus';
+      }
+      
+      // Since logs show PCM8 pattern is being detected sometimes,
+      // let's be more aggressive about PCM8 detection
+      return 'PCM8';
+    }
+    
+    // If we're connected to an Omi device, always use PCM8
+    if (this.connectedOmiDevice) {
+      return 'PCM8';
+    }
+    
+    // Default fallback (should rarely hit this)
+    return 'PCM8'; // Changed default from PCM16 to PCM8
+  }
+
   async scanForDevices(timeoutMs: number = 10000): Promise<OmiDevice[]> {
     if (this.isScanning) {
       console.warn('⚠️ Scan already in progress');
@@ -310,15 +349,36 @@ class OmiBluetoothService {
       console.log('🎵 Starting OmiConnection.startAudioBytesListener...');
       const subscription = this.omiConnection.startAudioBytesListener(
         (audioBytes: Uint8Array) => {
+          // Detect codec based on device and data patterns
+          const detectedCodec = this.detectAudioCodec(audioBytes);
+          
           // Convert to our AudioChunk format
           const audioChunk: AudioChunk = {
             data: audioBytes,
-            codec: 'Opus', // Omi devices stream in Opus format as confirmed by testing
+            codec: detectedCodec,
             timestamp: Date.now()
           };
           
-          // Emit to our audio stream service (reduced logging)
+          // Emit to our audio stream service (force immediate connection if needed)
           this.emit('audioChunk', audioChunk);
+          
+          // Force immediate initialization if no listeners
+          const callbacks = this.listeners.get('audioChunk');
+          if (!callbacks || callbacks.length === 0) {
+            console.log('🔧 No listeners detected - force connecting audio service...');
+            try {
+              const OmiAudioStreamService = require('./OmiAudioStreamService').default;
+              if (OmiAudioStreamService && OmiAudioStreamService.initialize) {
+                OmiAudioStreamService.initialize();
+              }
+              // Re-emit the chunk after initialization
+              setTimeout(() => {
+                this.emit('audioChunk', audioChunk);
+              }, 10);
+            } catch (error) {
+              console.error('❌ Failed to initialize audio service:', error);
+            }
+          }
           
           // Also call direct callback if set
           if (this.audioBufferCallback) {
